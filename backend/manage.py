@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# --- Force PyMySQL as MySQLdb and block old mysqlclient ---
+import sys
+import pymysql
+pymysql.install_as_MySQLdb()
+sys.modules['MySQLdb'] = pymysql
+
 """Django's command-line utility for administrative tasks."""
 import os
 import sys

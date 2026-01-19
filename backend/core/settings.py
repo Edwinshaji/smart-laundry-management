@@ -11,10 +11,13 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import pymysql
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+pymysql.install_as_MySQLdb()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -43,6 +46,8 @@ INSTALLED_APPS = [
     
     'accounts'
 ]
+
+AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -82,7 +87,7 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 DATABASES ={
     'default':{
-        'ENGINE':'django.db.backends.mysql',
+        'ENGINE':'django.db.backends.mysql',  # This works for PyMySQL
         'NAME':'smart_laundry_db',
         'USER':'root',
         'PASSWORD':'Edwin@1520',
@@ -128,6 +133,24 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-#cors configuration
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS / CSRF configuration
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+# Allow cookies to be sent with cross-origin requests
+CORS_ALLOW_CREDENTIALS = True
+
+# Permit CSRF cookies for the frontend origin
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
 
