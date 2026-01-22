@@ -44,7 +44,12 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     
-    'accounts'
+    'accounts',
+    'locations',
+    'branch_management',
+    'subscriptions',
+    'orders',
+    'payments',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'

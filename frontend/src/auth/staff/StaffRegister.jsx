@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
 import { useAuth } from "../../context/AuthContext";
@@ -16,7 +16,9 @@ const StaffRegister = () => {
     password: "",
     confirmPassword: "",
     role: "branch_manager",
+    branch_id: "",
   });
+  const [branches, setBranches] = useState([]);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { isLoggedIn, getDashboardPath } = useAuth();
@@ -25,6 +27,13 @@ const StaffRegister = () => {
     navigate(getDashboardPath(), { replace: true });
     return null;
   }
+
+  useEffect(() => {
+    axios
+      .get(`${API_BASE_URL}/api/admin/branches/`)
+      .then(res => setBranches(res.data))
+      .catch(() => setBranches([]));
+  }, []);
 
   const handleChange = e =>
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -36,6 +45,10 @@ const StaffRegister = () => {
       setError("Passwords do not match.");
       return;
     }
+    if (!form.branch_id) {
+      setError("Please select a branch.");
+      return;
+    }
     try {
       await axios.post(
         `${API_BASE_URL}/api/accounts/staff/register/`,
@@ -45,6 +58,7 @@ const StaffRegister = () => {
           phone: form.phone,
           password: form.password,
           role: form.role,
+          branch_id: form.branch_id,
         },
         { withCredentials: true }
       );
@@ -86,6 +100,22 @@ const StaffRegister = () => {
               >
                 <option value="branch_manager">Branch Manager</option>
                 <option value="delivery_staff">Delivery Staff</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block mb-1 text-sm font-medium text-gray-700">Branch</label>
+              <select
+                name="branch_id"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                value={form.branch_id}
+                onChange={handleChange}
+                required
+              >
+                <option value="">Select Branch</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} - {b.city}</option>
+                ))}
               </select>
             </div>
             <div>

@@ -3,10 +3,10 @@ import CustomerLogin from "../auth/customer/CustomerLogin";
 import CustomerRegister from "../auth/customer/CustomerRegister";
 import StaffLogin from "../auth/staff/StaffLogin";
 import StaffRegister from "../auth/staff/StaffRegister";
-import CustomerDashboard from "../dashboards/Customer";
-import ManagerDashboard from "../dashboards/Manager";
-import DeliveryDashboard from "../dashboards/Delivery";
-import AdminDashboard from "../dashboards/Admin";
+import CustomerDashboard from "../dashboards/customer/CustomerDashboard";
+import ManagerDashboard from "../dashboards/manager/ManagerDashboard";
+import DeliveryDashboard from "../dashboards/delivery/DeliveryDashboard";
+import AdminDashboard from "../dashboards/admin/AdminDashboard";
 import { useAuth } from "../context/AuthContext";
 
 const AppRoutes = () => {

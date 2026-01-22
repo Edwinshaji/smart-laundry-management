@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import WashMateLogo from "../assets/WashMate_logo.png";
-import illustration from "../assets/login-illustration.png";
+import { useAuth } from "../../context/AuthContext";
+import WashMateLogo from "../../assets/WashMate_logo.png";
+import illustration from "../../assets/login-illustration.png";
 
-const AdminDashboard = () => {
+const DeliveryDashboard = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
@@ -19,17 +19,17 @@ const AdminDashboard = () => {
           <img src={WashMateLogo} alt="WashMate Logo" className="w-80 h-32 object-contain rounded" />
         </div>
         <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold mb-2 text-gray-900">Super Admin Dashboard</h1>
-          <p className="text-gray-500">Manage branches, cities, approvals, and system analytics.</p>
+          <h1 className="text-3xl font-bold mb-2 text-gray-900">Delivery Staff Dashboard</h1>
+          <p className="text-gray-500">Track pickups, deliveries, and assigned zones.</p>
         </div>
         <div className="w-full max-w-sm space-y-4">
           <div className="bg-purple-100 rounded-lg p-4 shadow">
             <h2 className="font-semibold text-lg text-purple-700 mb-2">Quick Actions</h2>
             <ul className="list-disc list-inside text-gray-700 text-sm space-y-1">
-              <li>Approve branch managers</li>
-              <li>Manage cities & branches</li>
-              <li>Review system-wide analytics</li>
-              <li>Monitor users and revenue</li>
+              <li>View pending pickups</li>
+              <li>Mark orders reached branch</li>
+              <li>Mark deliveries completed</li>
+              <li>Update availability</li>
             </ul>
           </div>
           <button
@@ -44,10 +44,10 @@ const AdminDashboard = () => {
         </div>
       </div>
       <div className="hidden md:flex md:w-7/12 h-screen bg-purple-100 items-center justify-center">
-        <img src={illustration} alt="Admin Illustration" className="max-w-xl drop-shadow-xl" />
+        <img src={illustration} alt="Delivery Illustration" className="max-w-xl drop-shadow-xl" />
       </div>
     </div>
   );
 };
 
-export default AdminDashboard;
+export default DeliveryDashboard;

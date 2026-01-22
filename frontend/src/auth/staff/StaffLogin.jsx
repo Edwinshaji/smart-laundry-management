@@ -97,7 +97,7 @@ const StaffLogin = () => {
           </button>
         </form>
         <div className="mt-8 text-center text-sm text-gray-600">
-          Branch manager? <Link to="/staff/register" className="text-purple-700 hover:underline">Register here</Link>
+          Staff ? Don't have an account! <Link to="/staff/register" className="text-purple-700 hover:underline">Register here</Link>
         </div>
       </div>
       <div className="hidden md:flex md:w-7/12 bg-purple-100 items-center justify-center">
