@@ -7,7 +7,8 @@ import "react-toastify/dist/ReactToastify.css";
 import illustration from "../../assets/login-illustration.png";
 import WashMateLogo from "../../assets/WashMate_logo.png";
 
-const API_BASE_URL = "http://localhost:8000"; // Change port if needed
+// Make sure this matches your backend host exactly
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"; // Change port if needed
 
 const CustomerLogin = () => {
   const [email, setEmail] = useState("");
@@ -23,7 +24,7 @@ const CustomerLogin = () => {
       await axios.post(
         `${API_BASE_URL}/api/accounts/customer/login/`,
         { email, password },
-        { withCredentials: true }
+        { withCredentials: true } // <-- CRITICAL: must be present
       );
       toast.success("Login successful!");
       loginCustomer();

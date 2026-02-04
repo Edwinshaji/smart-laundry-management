@@ -3,6 +3,9 @@ from accounts.models import User
 from locations.models import Branch, CustomerAddress
 from branch_management.models import DeliveryStaff
 
+from django.db.models.signals import pre_delete  # NEW
+from django.dispatch import receiver  # NEW
+
 
 class Order(models.Model):
     ORDER_TYPE_CHOICES = [
@@ -34,6 +37,13 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order #{self.id}"
+
+
+@receiver(pre_delete, sender=Order)  # NEW
+def _delete_payments_for_deleted_order(sender, instance, using, **kwargs):
+    # Lazy import to avoid circular imports at module load time
+    from payments.models import Payment
+    Payment.objects.using(using).filter(order=instance).delete()
 
 
 class OrderWeight(models.Model):

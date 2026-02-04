@@ -15,7 +15,10 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import path, include
+
+# NEW: wire no-pickup endpoint
+from orders.views import CustomerNoPickupTodayView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -24,4 +27,10 @@ urlpatterns = [
     path('api/admin/', include('payments.urls')),
     path('api/admin/', include('accounts.admin_urls')),
     path('api/manager/', include('branch_management.urls')),
+    path("api/", include("orders.urls")),
+    path("api/", include("subscriptions.urls")),
+    path("api/", include("locations.urls")),
+    path("api/", include("payments.urls")),
+    # NEW: customer subscription skip-today
+    path("api/customer/subscription/no-pickup-today/", CustomerNoPickupTodayView.as_view()),
 ]

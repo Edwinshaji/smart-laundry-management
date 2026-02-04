@@ -9,16 +9,18 @@ class CitySerializer(serializers.ModelSerializer):
 class BranchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
-        # Exclude latitude and longitude from output, but allow for input
-        fields = ['id', 'city', 'branch_name', 'address', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        fields = '__all__'
 
 class ServiceZoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceZone
-        fields = ['id', 'branch', 'zone_name', 'pincodes']
+        fields = '__all__'
 
 class CustomerAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerAddress
-        fields = ['id', 'user', 'address_label', 'full_address', 'pincode', 'latitude', 'longitude', 'is_default', 'created_at', 'updated_at']
+        fields = ['id', 'address_label', 'full_address', 'pincode', 'latitude', 'longitude', 'is_default', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'is_default': {'required': False, 'default': False},
+        }

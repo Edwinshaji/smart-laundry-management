@@ -11,25 +11,41 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 import pymysql
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load .env file explicitly with override to ensure it loads
+env_path = BASE_DIR / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 pymysql.install_as_MySQLdb()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-r4$x0ct&)wqn)yk*t23b3visyw%3jwtzcn4w#!50is5@a4)_fr'
+# SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+# if not SECRET_KEY:
+#     raise RuntimeError("DJANGO_SECRET_KEY is not set. Check backend/.env and load_dotenv().")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", 'django-insecure-r4$x0ct&)wqn)yk*t23b3visyw%3jwtzcn4w#!50is5@a4)_fr')
 
-ALLOWED_HOSTS = []
+# DEBUG = os.getenv("DEBUG") == "True"
+DEBUG = os.getenv("DEBUG", "True") == "True"
 
+# dev convenience (prevents DisallowedHost when you move between localhost/127.0.0.1)
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+
+# Razorpay - strip quotes if accidentally included
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "").strip("'\"")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "").strip("'\"")
+
+# Debug: print to verify loading (remove in production)
+# if DEBUG:
+#     print(f"[settings] RAZORPAY_KEY_ID loaded: {bool(RAZORPAY_KEY_ID)}")
+#     print(f"[settings] RAZORPAY_KEY_SECRET loaded: {bool(RAZORPAY_KEY_SECRET)}")
 
 # Application definition
 
@@ -48,7 +64,7 @@ INSTALLED_APPS = [
     'locations',
     'branch_management',
     'subscriptions',
-    'orders',
+    'orders.apps.OrdersConfig',  # CHANGED: ensure OrdersConfig.ready() runs
     'payments',
 ]
 
@@ -56,8 +72,6 @@ AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -126,7 +140,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = os.getenv("TIME_ZONE", "Asia/Kolkata")
 
 USE_I18N = True
 
@@ -142,15 +156,31 @@ STATIC_URL = 'static/'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 # Allow cookies to be sent with cross-origin requests
 CORS_ALLOW_CREDENTIALS = True
 
-# Permit CSRF cookies for the frontend origin
+# IMPORTANT: For development, use Lax instead of None to avoid issues
+# None requires HTTPS in modern browsers
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# Dev over HTTP - keep False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+# Allow reading CSRF cookie in JS
+CSRF_COOKIE_HTTPONLY = False
+
+# IMPORTANT: Trust the frontend origin for CSRF
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 REST_FRAMEWORK = {
@@ -158,4 +188,13 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
 }
+
+# NEW: subscription monthly order generation horizon (used by management command / subscribe hook)
+MONTHLY_ORDER_GENERATE_DAYS_AHEAD = int(os.getenv("MONTHLY_ORDER_GENERATE_DAYS_AHEAD", "1"))
+
+# CHANGED: run “midnight” in your local business timezone
+TIME_ZONE = os.getenv("TIME_ZONE", "Asia/Kolkata")
+
+# NEW: toggle daily monthly-order generation thread (disable for multi-worker prod if needed)
+ENABLE_DAILY_MONTHLY_ORDER_JOB = os.getenv("ENABLE_DAILY_MONTHLY_ORDER_JOB", "True") == "True"
 

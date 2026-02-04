@@ -20,10 +20,10 @@ class Migration(migrations.Migration):
             name='Payment',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('amount', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('amount', models.DecimalField(decimal_places=2, max_digits=10, null=True, blank=True)),
                 ('payment_type', models.CharField(choices=[('monthly', 'Monthly'), ('demand', 'Demand')], max_length=10)),
                 ('payment_status', models.CharField(choices=[('pending', 'Pending'), ('paid', 'Paid'), ('failed', 'Failed')], max_length=10)),
-                ('due_date', models.DateField()),
+                ('due_date', models.DateField(null=True, blank=True)),
                 ('payment_date', models.DateField(blank=True, null=True)),
                 ('order', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='orders.order')),
                 ('subscription', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='subscriptions.customersubscription')),

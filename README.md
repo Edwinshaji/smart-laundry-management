@@ -158,25 +158,42 @@ END OF AUTHENTICATION & AUTHORIZATION
 - Fine: ₹10 per day until payment is completed
 
 --------------------------------------------------------------------
-6. DELIVERY STAFF WORKFLOW
+6. DELIVERY STAFF WORKFLOW (UPDATED)
 --------------------------------------------------------------------
-The delivery staff dashboard is divided into clear operational stages:
+Delivery dashboard is separated into pages (separate React components):
 
-1. Pickup Pending
-   - View assigned pickups
-   - See address and map location
-   - Mark pickup complete
-   - Enter weight (mandatory)
+- Pickup Pending
+  - Shows Today’s pickups and Upcoming pickups (date-based grouping)
+  - Sorting by pickup_date available
 
-2. Reached Branch
-   - Mark orders as reached branch
-   - Bulk update option available
+- Reached Branch
+  - Orders moved here after Picked Up
+  - Per-order “Reached” + bulk select-and-mark
 
-3. Ready for Delivery
-   - View washed orders
-   - Mark delivered with timestamp
+- Out for Delivery
+  - Date-priority grouping:
+    • Deliver Today
+    • Overdue
+    • Deliver Later
+  - Sorting by delivery date available
 
-Monthly and demand-based orders are displayed separately.
+- History
+  - Delivered orders list
+
+Notes:
+- Demand vs Subscription are shown as two lanes/tabs, but share the same status model.
+- UI shows serial numbers per section/day instead of DB order IDs.
+
+Implementation note:
+- Status tracking remains:
+  scheduled → picked_up → reached_branch → washing → ready_for_delivery → delivered
+- Demand and Monthly are displayed separately but share the same status model.
+
+Delivery staff also has a Profile page:
+- View assigned Branch + Service Zone
+- Edit name/contact details
+- Change password
+- View availability status
 
 --------------------------------------------------------------------
 7. CUSTOMER DASHBOARD FEATURES
@@ -240,6 +257,19 @@ Frontend Routes:
 - /delivery
 - /branch
 - /admin
+
+API Routes (key ones)
+- Customer subscriptions:
+  - GET  /api/subscriptions/plans/
+  - GET  /api/subscriptions/me/
+  - POST /api/subscriptions/subscribe/
+  - POST /api/subscriptions/cancel/
+- Customer payments:
+  - GET  /api/customer/payments/
+  - POST /api/customer/payments/pay/
+- Razorpay:
+  - POST /api/payments/create-order/
+  - POST /api/payments/verify/
 
 --------------------------------------------------------------------
 11. BACKEND ARCHITECTURE
@@ -316,7 +346,7 @@ Fields:
 - id (PK)
 - branch_id (FK → branches.id)
 - zone_name (VARCHAR)
-- pincode (VARCHAR)
+- pincodes (JSON array of strings)  # Example: ["682001", "682002", "682003"]
 
 --------------------------------------------------------------------
 12.6 delivery_staff
@@ -462,3 +492,46 @@ Constraint:
 --------------------------------------------------------------------
 END OF DOCUMENT
 --------------------------------------------------------------------
+
+--------------------------------------------------------------------
+14. PAYMENT SYSTEM
+--------------------------------------------------------------------
+
+14.1 SUBSCRIPTION (MONTHLY) PAYMENTS
+------------------------------------
+- Payment is auto-generated when customer subscribes to a plan
+- Subscription is valid for 30 days from subscription date
+- First payment due within 4 days of subscription
+- When payment is made, subscription extends by 30 days
+- Next payment is auto-generated with due date at end of new period
+- Rolling 30-day billing cycle (not calendar month based)
+
+Example:
+- Customer subscribes on Jan 15
+- First payment due by Jan 19 (4-day grace)
+- Subscription valid until Feb 14
+- When first payment made, subscription extends to Mar 16
+- Next payment due on Feb 14
+
+14.2 DEMAND-BASED ORDER PAYMENTS
+--------------------------------
+- Payment is auto-generated when customer places an order
+- Initial amount = ₹100 (minimum charge)
+- Amount is recalculated when weight is recorded at pickup:
+  Amount = max(weight_kg × ₹50, ₹100)
+- Due date is set when order is delivered (1 day after delivery)
+- Customer can pay only after order is delivered
+- Fine: ₹10 per day after due date
+
+14.3 SCHEDULED TASKS (CRON)
+---------------------------
+Run daily to calculate fines for overdue payments:
+
+# Calculate fines for overdue payments (run daily)
+0 1 * * * cd /path/to/backend && python manage.py calculate_fines
+
+14.4 RAZORPAY INTEGRATION
+-------------------------
+- POST /api/payments/create-order/ - Create Razorpay order
+- POST /api/payments/verify/ - Verify payment signature
+- POST /api/customer/payments/pay/ - Mark payment as paid in DB

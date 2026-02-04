@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
 const Payments = () => {
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
@@ -10,7 +8,7 @@ const Payments = () => {
 
   useEffect(() => {
     axios
-      .get(`${API_BASE_URL}/api/admin/payments/`, { withCredentials: true })
+      .get(`/api/admin/payments/`, { withCredentials: true })
       .then((res) => setRows(res.data))
       .catch(() => setRows([]));
   }, []);

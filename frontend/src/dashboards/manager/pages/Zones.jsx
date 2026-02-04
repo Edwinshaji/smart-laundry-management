@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
 const Zones = () => {
   const [zones, setZones] = useState([]);
   const [form, setForm] = useState({ zone_name: "", pincodes: "" });
@@ -10,7 +8,7 @@ const Zones = () => {
 
   const fetchZones = () => {
     axios
-      .get(`${API_BASE_URL}/api/manager/zones/`, { withCredentials: true })
+      .get(`/api/manager/zones/`, { withCredentials: true })
       .then((res) => setZones(res.data))
       .catch(() => setZones([]));
   };
@@ -20,12 +18,12 @@ const Zones = () => {
   }, []);
 
   const handleSubmit = async () => {
-    const payload = { ...form, pincodes: form.pincodes.split(",").map(p => p.trim()).filter(Boolean) };
+    const payload = { ...form, pincodes: form.pincodes.split(",").map((p) => p.trim()).filter(Boolean) };
     if (editingId) {
-      await axios.put(`${API_BASE_URL}/api/manager/zones/${editingId}/`, payload, { withCredentials: true });
+      await axios.put(`/api/manager/zones/${editingId}/`, payload, { withCredentials: true });
       setEditingId(null);
     } else {
-      await axios.post(`${API_BASE_URL}/api/manager/zones/`, payload, { withCredentials: true });
+      await axios.post(`/api/manager/zones/`, payload, { withCredentials: true });
     }
     setForm({ zone_name: "", pincodes: "" });
     fetchZones();
@@ -37,7 +35,7 @@ const Zones = () => {
   };
 
   const handleDelete = async (id) => {
-    await axios.delete(`${API_BASE_URL}/api/manager/zones/${id}/`, { withCredentials: true });
+    await axios.delete(`/api/manager/zones/${id}/`, { withCredentials: true });
     fetchZones();
   };
 

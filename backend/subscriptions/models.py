@@ -6,7 +6,7 @@ class SubscriptionPlan(models.Model):
     name = models.CharField(max_length=100)
     monthly_price = models.DecimalField(max_digits=10, decimal_places=2)
     max_weight_per_month = models.DecimalField(max_digits=6, decimal_places=2)
-    description = models.TextField()
+    description = models.TextField(blank=True, default="")
 
     def __str__(self):
         return self.name

@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useState } from "react";
-import { FiHome, FiGrid, FiUsers, FiCheckCircle, FiBarChart2, FiDollarSign, FiSettings, FiMenu } from "react-icons/fi";
+import { FiHome, FiGrid, FiUsers, FiCheckCircle, FiBarChart2, FiDollarSign, FiSettings, FiMenu, FiFileText } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import Overview from "./pages/Overview";
 import Cities from "./pages/Cities";
@@ -11,6 +11,7 @@ import Users from "./pages/Users";
 import Analytics from "./pages/Analytics";
 import Payments from "./pages/Payments";
 import Settings from "./pages/Settings";
+import Plans from "./pages/Plans";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ const AdminDashboard = () => {
 
   const handleTabChange = (key) => {
     setActive(key);
+    setMobileOpen(false); // NEW
     localStorage.setItem("admin_active_tab", key);
   };
 
@@ -34,8 +36,9 @@ const AdminDashboard = () => {
     { key: "branches", label: "Branches", icon: FiGrid },
     { key: "approvals", label: "Approvals", icon: FiCheckCircle },
     { key: "users", label: "Users", icon: FiUsers },
-    { key: "analytics", label: "Analytics", icon: FiBarChart2 },
+    { key: "plans", label: "Plans", icon: FiFileText },
     { key: "payments", label: "Payments", icon: FiDollarSign },
+    { key: "analytics", label: "Analytics", icon: FiBarChart2 },
     { key: "settings", label: "Settings", icon: FiSettings },
   ];
 
@@ -48,6 +51,7 @@ const AdminDashboard = () => {
     analytics: <Analytics />,
     payments: <Payments />,
     settings: <Settings />,
+    plans: <Plans />,
   };
 
   return (

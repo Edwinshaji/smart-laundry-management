@@ -1,13 +1,15 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useState } from "react";
-import { FiHome, FiUsers, FiMapPin, FiClipboard, FiMap, FiMenu } from "react-icons/fi";
+import { FiHome, FiUsers, FiMapPin, FiClipboard, FiMap, FiMenu, FiCheckCircle, FiFileText } from "react-icons/fi";
 import ManagerSidebar from "../../components/manager/ManagerSidebar";
 import Overview from "./pages/Overview";
 import Staff from "./pages/Staff";
 import Zones from "./pages/Zones";
 import Orders from "./pages/Orders";
 import Branch from "./pages/Branch";
+import Approvals from "./pages/Approvals";
+import Subscriptions from "./pages/Subscriptions";
 
 const ManagerDashboard = () => {
   const navigate = useNavigate();
@@ -22,22 +24,27 @@ const ManagerDashboard = () => {
 
   const handleTabChange = (key) => {
     setActive(key);
+    setMobileOpen(false); // NEW: close drawer on navigate (mobile)
     localStorage.setItem("manager_active_tab", key);
   };
 
   const navItems = [
     { key: "overview", label: "Overview", icon: FiHome },
+    { key: "approvals", label: "Approvals", icon: FiCheckCircle },
     { key: "staff", label: "Staff", icon: FiUsers },
     { key: "zones", label: "Zones", icon: FiMap },
     { key: "orders", label: "Orders", icon: FiClipboard },
+    { key: "subscriptions", label: "Subscriptions", icon: FiFileText },
     { key: "branch", label: "Branch", icon: FiMapPin },
   ];
 
   const pages = {
     overview: <Overview />,
+    approvals: <Approvals />,
     staff: <Staff />,
     zones: <Zones />,
     orders: <Orders />,
+    subscriptions: <Subscriptions />,
     branch: <Branch />,
   };
 

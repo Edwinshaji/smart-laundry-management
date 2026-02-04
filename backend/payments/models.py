@@ -9,27 +9,42 @@ class Payment(models.Model):
         ("monthly", "Monthly"),
         ("demand", "Demand"),
     ]
-
-    PAYMENT_STATUS = [
+    PAYMENT_STATUS_CHOICES = [
         ("pending", "Pending"),
         ("paid", "Paid"),
         ("failed", "Failed"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True)
-    subscription = models.ForeignKey(CustomerSubscription, on_delete=models.SET_NULL, null=True, blank=True)
-
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    order = models.ForeignKey(
+        "orders.Order", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    subscription = models.ForeignKey(
+        "subscriptions.CustomerSubscription",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments"
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPE_CHOICES)
-    payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS)
-
-    due_date = models.DateField()
+    payment_status = models.CharField(
+        max_length=10, choices=PAYMENT_STATUS_CHOICES, default="pending"
+    )
     payment_date = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Payment {self.id} - {self.user.full_name} - {self.payment_status}"
 
 
 class PaymentFine(models.Model):
-    payment = models.ForeignKey(Payment, on_delete=models.CASCADE)
-    fine_amount = models.DecimalField(max_digits=8, decimal_places=2)
+    payment = models.OneToOneField(
+        Payment, on_delete=models.CASCADE, related_name="fine"
+    )
+    fine_amount = models.DecimalField(max_digits=10, decimal_places=2)
     fine_days = models.IntegerField()
     calculated_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Fine for Payment {self.payment_id}"

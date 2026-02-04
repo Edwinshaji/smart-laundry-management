@@ -6,7 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import illustration from "../../assets/login-illustration.png";
 import WashMateLogo from "../../assets/WashMate_logo.png";
 
-const API_BASE_URL = "http://localhost:8000"; // Change port if needed
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"; // Change port if needed
 
 const StaffRegister = () => {
   const [form, setForm] = useState({

@@ -5,7 +5,7 @@ import StaffLogin from "../auth/staff/StaffLogin";
 import StaffRegister from "../auth/staff/StaffRegister";
 import CustomerDashboard from "../dashboards/customer/CustomerDashboard";
 import ManagerDashboard from "../dashboards/manager/ManagerDashboard";
-import DeliveryDashboard from "../dashboards/delivery/DeliveryDashboard";
+import DeliveryDashboard from "../dashboards/delivery/DeliveryDashboard.jsx";
 import AdminDashboard from "../dashboards/admin/AdminDashboard";
 import { useAuth } from "../context/AuthContext";
 
@@ -47,6 +47,12 @@ const AppRoutes = () => {
           path="/dashboards/admin"
           element={guardDashboard("super_admin", <AdminDashboard />)}
         />
+
+        {/* NEW: route aliases (matches README) */}
+        <Route path="/customer" element={<Navigate to="/dashboards/customer" replace />} />
+        <Route path="/delivery" element={<Navigate to="/dashboards/delivery" replace />} />
+        <Route path="/branch" element={<Navigate to="/dashboards/manager" replace />} />
+        <Route path="/admin" element={<Navigate to="/dashboards/admin" replace />} />
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

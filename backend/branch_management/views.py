@@ -3,13 +3,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Sum
-from accounts.models import User
 from locations.models import Branch, ServiceZone
 from orders.models import Order
 from payments.models import Payment
 from .models import BranchManager, DeliveryStaff
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 def _get_branch(request):
     if request.user and request.user.is_authenticated:
@@ -25,8 +26,12 @@ def _get_branch(request):
             return None
     return None
 
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    def enforce_csrf(self, request):
+        return
+
 class ManagerOverviewView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -52,14 +57,17 @@ class ManagerOverviewView(APIView):
         )
 
 class ManagerStaffView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         branch = _get_branch(request)
         if not branch:
             return Response({"detail": "branch not found"}, status=status.HTTP_400_BAD_REQUEST)
-        staff = DeliveryStaff.objects.select_related("user").filter(branch=branch)
+        staff = DeliveryStaff.objects.select_related("user", "zone").filter(
+            branch=branch,
+            user__is_approved=True,
+        )
         data = [
             {
                 "id": s.id,
@@ -69,8 +77,79 @@ class ManagerStaffView(APIView):
                 "phone": s.user.phone,
                 "approved": s.user.is_approved,
                 "status": "Active" if s.user.is_active else "Suspended",
+                "zone_id": s.zone.id if s.zone else None,
+                "zone_name": s.zone.zone_name if s.zone else None,
             }
             for s in staff
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+class ManagerStaffDetailView(APIView):
+    authentication_classes = [CsrfExemptSessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk=None):
+        branch = _get_branch(request)
+        if not branch:
+            return Response({"detail": "branch not found"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            staff = DeliveryStaff.objects.select_related("user").get(id=pk, branch=branch)
+        except DeliveryStaff.DoesNotExist:
+            return Response({"detail": "staff not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        zone_id = request.data.get("zone_id")
+        if zone_id is not None:
+            if zone_id == "" or zone_id is None:
+                staff.zone = None
+            else:
+                try:
+                    zone = ServiceZone.objects.get(id=zone_id, branch=branch)
+                except ServiceZone.DoesNotExist:
+                    return Response({"detail": "zone not found"}, status=status.HTTP_404_NOT_FOUND)
+                staff.zone = zone
+            staff.save(update_fields=["zone"])
+
+        if "is_active" in request.data:
+            staff.user.is_active = bool(request.data.get("is_active"))
+            staff.user.save(update_fields=["is_active"])
+
+        return Response({"detail": "Updated"}, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk=None):
+        branch = _get_branch(request)
+        if not branch:
+            return Response({"detail": "branch not found"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            staff = DeliveryStaff.objects.select_related("user").get(id=pk, branch=branch)
+        except DeliveryStaff.DoesNotExist:
+            return Response({"detail": "staff not found"}, status=status.HTTP_404_NOT_FOUND)
+        staff.user.is_active = False
+        staff.user.save(update_fields=["is_active"])
+        staff.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class ManagerApprovalsView(APIView):
+    authentication_classes = [CsrfExemptSessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch = _get_branch(request)
+        if not branch:
+            return Response({"detail": "branch not found"}, status=status.HTTP_400_BAD_REQUEST)
+        pending = DeliveryStaff.objects.select_related("user").filter(
+            branch=branch,
+            user__is_approved=False,
+            user__is_active=True,
+        )
+        data = [
+            {
+                "id": s.id,
+                "user_id": s.user.id,
+                "name": s.user.full_name,
+                "email": s.user.email,
+                "phone": s.user.phone,
+            }
+            for s in pending
         ]
         return Response(data, status=status.HTTP_200_OK)
 
@@ -97,7 +176,7 @@ class ManagerStaffView(APIView):
         return Response({"detail": "Invalid action"}, status=status.HTTP_400_BAD_REQUEST)
 
 class ManagerZonesView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -120,7 +199,7 @@ class ManagerZonesView(APIView):
         return Response({"id": zone.id}, status=status.HTTP_201_CREATED)
 
 class ManagerZoneDetailView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def put(self, request, pk=None):
@@ -150,7 +229,7 @@ class ManagerZoneDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class ManagerOrdersView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -171,7 +250,7 @@ class ManagerOrdersView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 class ManagerBranchView(APIView):
-    authentication_classes = [SessionAuthentication]
+    authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

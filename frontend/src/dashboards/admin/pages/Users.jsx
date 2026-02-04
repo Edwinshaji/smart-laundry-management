@@ -9,9 +9,7 @@ const Users = () => {
 
   useEffect(() => {
     axios
-      .get(`${API_BASE_URL}/api/admin/users/?role=${roleFilter}`, {
-        withCredentials: true,
-      })
+      .get(`${API_BASE_URL}/api/admin/users/?role=${roleFilter}`, { withCredentials: true })
       .then((res) => setUsers(res.data))
       .catch(() => setUsers([]));
   }, [roleFilter]);

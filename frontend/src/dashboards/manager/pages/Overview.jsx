@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
 const Overview = () => {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
     axios
-      .get(`${API_BASE_URL}/api/manager/overview/`, { withCredentials: true })
+      .get(`/api/manager/overview/`, { withCredentials: true })
       .then((res) => setStats(res.data))
       .catch(() => setStats(null));
   }, []);

@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
 const Orders = () => {
   const [rows, setRows] = useState([]);
 
   useEffect(() => {
     axios
-      .get(`${API_BASE_URL}/api/manager/orders/`, { withCredentials: true })
+      .get(`/api/manager/orders/`, { withCredentials: true })
       .then((res) => setRows(res.data))
       .catch(() => setRows([]));
   }, []);

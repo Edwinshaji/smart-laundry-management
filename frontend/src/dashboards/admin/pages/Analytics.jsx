@@ -8,7 +8,7 @@ const Analytics = () => {
 
   useEffect(() => {
     axios
-      .get(`${API_BASE_URL}/api/admin/analytics/`, { withCredentials: true })
+      .get(`/api/admin/analytics/`, { withCredentials: true })
       .then((res) => setStats(res.data))
       .catch(() => setStats(null));
   }, []);

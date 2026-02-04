@@ -18,15 +18,34 @@ class UserRegisterSerializer(serializers.ModelSerializer):
 class UserLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
-    role = serializers.CharField(required=False)
+    role = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, data):
-        user = authenticate(email=data['email'], password=data['password'])
-        if not user:
-            raise serializers.ValidationError("Invalid credentials")
-        if not user.is_active or not user.is_approved:
-            raise serializers.ValidationError("Account not active or not approved")
-        if 'role' in data and user.role != data['role']:
-            raise serializers.ValidationError("Role mismatch")
-        data['user'] = user
+        email = data.get("email")
+        password = data.get("password")
+        role = data.get("role")
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({"detail": "Invalid email or password."})
+
+        if not user.check_password(password):
+            raise serializers.ValidationError({"detail": "Invalid email or password."})
+
+        if not user.is_active:
+            raise serializers.ValidationError({"detail": "Account is deactivated."})
+
+        # Check role if provided (staff login)
+        if role and user.role != role:
+            raise serializers.ValidationError({"detail": f"You are not registered as {role}."})
+
+        # Check approval for roles that require it
+        if user.role in ["branch_manager", "delivery_staff"] and not user.is_approved:
+            if user.role == "branch_manager":
+                raise serializers.ValidationError({"detail": "Awaiting Super Admin approval."})
+            else:
+                raise serializers.ValidationError({"detail": "Awaiting Branch Manager approval."})
+
+        data["user"] = user
         return data
