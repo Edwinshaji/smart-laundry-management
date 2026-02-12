@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FiHome, FiUsers, FiMapPin, FiClipboard, FiMap, FiMenu, FiCheckCircle, FiFileText } from "react-icons/fi";
 import ManagerSidebar from "../../components/manager/ManagerSidebar";
 import Overview from "./pages/Overview";
@@ -19,7 +19,7 @@ const ManagerDashboard = () => {
 
   const handleLogout = () => {
     logout();
-    navigate("/login", { replace: true });
+    navigate("/", { replace: true });
   };
 
   const handleTabChange = (key) => {
@@ -27,6 +27,18 @@ const ManagerDashboard = () => {
     setMobileOpen(false); // NEW: close drawer on navigate (mobile)
     localStorage.setItem("manager_active_tab", key);
   };
+
+  useEffect(() => {
+    const onNavigateTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (!tab) return;
+      setActive(tab);
+      setMobileOpen(false);
+      localStorage.setItem("manager_active_tab", tab);
+    };
+    window.addEventListener("manager:navigate", onNavigateTab);
+    return () => window.removeEventListener("manager:navigate", onNavigateTab);
+  }, []);
 
   const navItems = [
     { key: "overview", label: "Overview", icon: FiHome },

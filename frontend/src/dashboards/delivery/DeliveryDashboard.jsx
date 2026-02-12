@@ -46,7 +46,7 @@ const DeliveryDashboard = () => {
 
   const handleLogout = () => {
     logout();
-    navigate("/login", { replace: true });
+    navigate("/", { replace: true });
   };
 
   const handleTabChange = (key) => {
@@ -55,16 +55,16 @@ const DeliveryDashboard = () => {
     localStorage.setItem("delivery_active_tab", key);
   };
 
-  // CHANGED: make these functions update state
-  const fetchOrders = async (statusFilter, setter) => {
+  // CHANGED: return arrays instead of directly setting (so we can merge statuses)
+  const fetchOrders = async (statusFilter) => {
     try {
       const res = await axios.get(
         `${API_BASE_URL}/api/delivery/orders/?status=${statusFilter}`,
         { withCredentials: true }
       );
-      setter(Array.isArray(res.data) ? res.data : []);
+      return Array.isArray(res.data) ? res.data : [];
     } catch {
-      setter([]); // keep UI stable
+      return [];
     }
   };
 
@@ -95,11 +95,34 @@ const DeliveryDashboard = () => {
     );
   };
 
-  const refreshAll = () => {
-    fetchOrders("scheduled", setPickups);
-    fetchOrders("picked_up", setReached);
-    fetchOrders("ready_for_delivery", setReady);
-    fetchOrders("delivered", setHistory);
+  const _mergeById = (rows) => {
+    const m = new Map();
+    for (const r of rows) m.set(r.id, r);
+    return Array.from(m.values());
+  };
+
+  const refreshAll = async () => {
+    const [
+      scheduled,
+      pickedUp,
+      readyForDelivery,
+      reachedBranch,
+      delivered,
+    ] = await Promise.all([
+      fetchOrders("scheduled"),
+      fetchOrders("picked_up"),
+      fetchOrders("ready_for_delivery"),
+      fetchOrders("reached_branch"), // NEW: include these in Out-for-Delivery
+      fetchOrders("delivered"),
+    ]);
+
+    setPickups(scheduled);
+    setReached(pickedUp);
+
+    // CHANGED: Out for Delivery shows both ready_for_delivery + reached_branch
+    setReady(_mergeById([...readyForDelivery, ...reachedBranch]));
+
+    setHistory(delivered);
   };
 
   useEffect(() => {
@@ -218,14 +241,23 @@ const DeliveryDashboard = () => {
   );
 
   const renderOrderRow = (r, idx, opts = {}) => {
-    // no DB ID displayed: only section-based numbering
+    const isChecked = opts.checkbox ? selectedReached.has(r.id) : false;
+
     return (
-      <tr key={r.id} className="align-top">
+      <tr
+        key={r.id}
+        className={[
+          "align-top transition-colors",
+          isChecked ? "bg-emerald-50" : "bg-white",
+          "hover:bg-gray-50",
+        ].join(" ")}
+      >
         {opts.checkbox && (
-          <td className="py-2 px-3">
+          <td className="py-3 px-4 w-12">
             <input
               type="checkbox"
-              checked={selectedReached.has(r.id)}
+              className="h-4 w-4 accent-emerald-600"
+              checked={isChecked}
               onChange={(e) => {
                 setSelectedReached((prev) => {
                   const next = new Set(prev);
@@ -237,55 +269,80 @@ const DeliveryDashboard = () => {
             />
           </td>
         )}
-        <td className="py-2 px-3">{idx + 1}</td>
-        <td className="py-2 px-3">
-          <div className="font-medium text-gray-800">{r.customer}</div>
-          <div className="text-xs text-gray-500">{r.customer_phone}</div>
+
+        <td className="py-3 px-4 w-16 text-gray-900 font-medium">{idx + 1}</td>
+
+        <td className="py-3 px-4">
+          <div className="font-medium text-gray-900">{r.customer}</div>
+          <div className="text-xs text-gray-500 mt-0.5">{r.customer_phone}</div>
         </td>
-        <td className="py-2 px-3">
-          <div className="text-sm text-gray-700">{r.full_address || r.address}</div>
-          <div className="text-xs text-gray-500">{r.pincode}</div>
+
+        <td className="py-3 px-4">
+          <div className="text-sm text-gray-800">{r.full_address || r.address}</div>
+          <div className="text-xs text-gray-500 mt-0.5">PIN: {r.pincode || "-"}</div>
         </td>
-        <td className="py-2 px-3">
-          <div className="text-sm">{r.branch_name || "-"}</div>
+
+        <td className="py-3 px-4">
+          <div className="text-sm text-gray-800">{r.branch_name || "-"}</div>
         </td>
-        <td className="py-2 px-3">
-          <div className="text-sm">{toStr(r.pickup_date)}</div>
-          <div className="text-xs text-gray-500">{r.pickup_shift}</div>
+
+        <td className="py-3 px-4">
+          <div className="text-sm text-gray-900">{toStr(r.pickup_date)}</div>
+          <div className="text-xs text-gray-500 mt-0.5 capitalize">{r.pickup_shift || "-"}</div>
         </td>
+
         {opts.expectedDelivery && (
-          <td className="py-2 px-3 text-sm">{toStr(r.expected_delivery_date)}</td>
+          <td className="py-3 px-4 text-sm text-gray-900">{toStr(r.expected_delivery_date) || "-"}</td>
         )}
-        <td className="py-2 px-3">
-          {opts.action}
-        </td>
+
+        <td className="py-3 px-4">{opts.action}</td>
       </tr>
     );
   };
 
   const Table = ({ columns, children }) => (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[980px] border">
-        <thead className="text-left text-gray-500 bg-gray-50">
-          <tr>{columns}</tr>
-        </thead>
-        <tbody className="divide-y text-gray-700">{children}</tbody>
-      </table>
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[980px]">
+          <thead className="text-left text-[11px] tracking-wide uppercase text-gray-500 bg-gray-50 border-b border-gray-100">
+            <tr>{columns}</tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">{children}</tbody>
+        </table>
+      </div>
     </div>
   );
 
   const LaneHeader = () => (
     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <button
-          className={`px-3 py-2 rounded-lg text-sm border ${lane === "demand" ? "bg-purple-600 text-white border-purple-600" : "bg-white"}`}
-          onClick={() => { setLane("demand"); localStorage.setItem("delivery_lane", "demand"); setSelectedReached(new Set()); }}
+          className={[
+            "px-4 py-2 rounded-xl text-sm font-semibold border transition-colors",
+            lane === "demand"
+              ? "bg-gray-900 text-white border-gray-900"
+              : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
+          ].join(" ")}
+          onClick={() => {
+            setLane("demand");
+            localStorage.setItem("delivery_lane", "demand");
+            setSelectedReached(new Set());
+          }}
         >
           Demand Orders
         </button>
         <button
-          className={`px-3 py-2 rounded-lg text-sm border ${lane === "monthly" ? "bg-purple-600 text-white border-purple-600" : "bg-white"}`}
-          onClick={() => { setLane("monthly"); localStorage.setItem("delivery_lane", "monthly"); setSelectedReached(new Set()); }}
+          className={[
+            "px-4 py-2 rounded-xl text-sm font-semibold border transition-colors",
+            lane === "monthly"
+              ? "bg-gray-900 text-white border-gray-900"
+              : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
+          ].join(" ")}
+          onClick={() => {
+            setLane("monthly");
+            localStorage.setItem("delivery_lane", "monthly");
+            setSelectedReached(new Set());
+          }}
         >
           Subscription Orders
         </button>
@@ -294,7 +351,11 @@ const DeliveryDashboard = () => {
       {active === "pickup" && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">Sort by pickup date</span>
-          <select className="border rounded px-2 py-1 text-xs" value={pickupSort} onChange={(e) => setPickupSort(e.target.value)}>
+          <select
+            className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-white"
+            value={pickupSort}
+            onChange={(e) => setPickupSort(e.target.value)}
+          >
             <option value="asc">Oldest first</option>
             <option value="desc">Newest first</option>
           </select>
@@ -304,7 +365,11 @@ const DeliveryDashboard = () => {
       {active === "ready" && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">Sort by delivery date</span>
-          <select className="border rounded px-2 py-1 text-xs" value={readySort} onChange={(e) => setReadySort(e.target.value)}>
+          <select
+            className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-white"
+            value={readySort}
+            onChange={(e) => setReadySort(e.target.value)}
+          >
             <option value="asc">Soonest first</option>
             <option value="desc">Latest first</option>
           </select>

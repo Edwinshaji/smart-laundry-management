@@ -1,7 +1,12 @@
-"""
-Management command to generate monthly subscription payments.
-Run this on the 1st of each month via cron/scheduler:
-    python manage.py generate_monthly_payments
+"""payments.management.commands.generate_monthly_payments
+
+Generate renewal payments for active subscriptions.
+
+Rule:
+- Do NOT create a new monthly payment immediately after a payment is marked paid.
+- Create the next payment only when the current 30-day subscription period completes.
+
+This is a rolling 30-day cycle (not calendar-month based).
 """
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -19,11 +24,23 @@ class Command(BaseCommand):
             action="store_true",
             help="Show what would be created without actually creating",
         )
+        parser.add_argument(
+            "--today",
+            type=str,
+            default=None,
+            help="Override today's date (YYYY-MM-DD). Useful for testing.",
+        )
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
-        today = date.today()
-        month_str = today.strftime("%Y-%m")
+        raw_today = options.get("today")
+        if raw_today:
+            try:
+                today = date.fromisoformat(str(raw_today))
+            except Exception:
+                raise ValueError("--today must be in YYYY-MM-DD format")
+        else:
+            today = date.today()
         
         # Get all active subscriptions
         active_subs = CustomerSubscription.objects.select_related("plan", "user").filter(
@@ -35,22 +52,34 @@ class Command(BaseCommand):
         skipped_count = 0
         
         for sub in active_subs:
-            # Check if payment for this month already exists
-            existing = Payment.objects.filter(
+            # Idempotency: if there's any pending monthly payment, never create another.
+            has_pending = Payment.objects.filter(
                 subscription=sub,
                 payment_type="monthly",
-                due_date__year=today.year,
-                due_date__month=today.month,
+                payment_status="pending",
             ).exists()
-            
-            if existing:
+
+            if has_pending:
                 skipped_count += 1
                 if options["verbosity"] >= 2:
-                    self.stdout.write(f"  Skipped: {sub.user.full_name} (already has payment for {month_str})")
+                    self.stdout.write(f"  Skipped: {sub.user.full_name} (has pending monthly payment)")
                 continue
-            
-            # Payment window: 1st to 4th of every month
-            due_date = today.replace(day=4) if today.day <= 4 else today + timedelta(days=4)
+
+            # Rolling renewal: generate only when the current period completes.
+            # Subscription end_date is extended by +30 days upon successful payment.
+            cycle_end = sub.end_date
+            if not cycle_end:
+                # Fallback for legacy/edge cases
+                cycle_end = sub.start_date + timedelta(days=30)
+
+            if today < cycle_end:
+                skipped_count += 1
+                if options["verbosity"] >= 2:
+                    self.stdout.write(f"  Skipped: {sub.user.full_name} (not due yet)")
+                continue
+
+            # 4-day grace window from generation date
+            due_date = today + timedelta(days=4)
             
             if dry_run:
                 self.stdout.write(f"  [DRY-RUN] Would create: {sub.user.full_name} - ₹{sub.plan.monthly_price}")

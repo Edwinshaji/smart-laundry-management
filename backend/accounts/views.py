@@ -1,6 +1,8 @@
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.middleware.csrf import get_token
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,6 +13,16 @@ from .serializers import UserRegisterSerializer, UserLoginSerializer
 from .models import User
 from branch_management.models import BranchManager, DeliveryStaff
 from locations.models import Branch
+
+
+@method_decorator(ensure_csrf_cookie, name='dispatch')
+class CsrfTokenView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        token = get_token(request)
+        return Response({"csrfToken": token}, status=status.HTTP_200_OK)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CustomerRegisterView(APIView):

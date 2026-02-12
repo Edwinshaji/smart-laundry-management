@@ -9,6 +9,21 @@ import "./index.css";
 axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || "";
 axios.defaults.withCredentials = true;
 
+// Django CSRF support
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
+const getCookie = (name) => {
+	if (typeof document === "undefined") return null;
+	const parts = document.cookie.split(";").map((c) => c.trim());
+	for (const part of parts) {
+		if (part.startsWith(`${name}=`)) {
+			return decodeURIComponent(part.substring(name.length + 1));
+		}
+	}
+	return null;
+};
+
 const MUTATION_METHODS = new Set(["post", "put", "patch", "delete"]);
 const shouldToastForConfig = (config) => {
 	const url = config?.url || "";
@@ -28,6 +43,16 @@ const shouldToastForConfig = (config) => {
 axios.interceptors.request.use((config) => {
 	if (typeof navigator !== "undefined" && navigator.onLine === false) {
 		return Promise.reject(new Error("offline"));
+	}
+
+	// Ensure CSRF header is present for unsafe methods (SessionAuthentication)
+	const method = (config?.method || "").toLowerCase();
+	if (MUTATION_METHODS.has(method)) {
+		const csrf = getCookie("csrftoken");
+		if (csrf) {
+			config.headers = config.headers || {};
+			if (!config.headers["X-CSRFToken"]) config.headers["X-CSRFToken"] = csrf;
+		}
 	}
 	return config;
 });
@@ -62,3 +87,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 		<App />
 	</React.StrictMode>
 );
+
+// Prime CSRF cookie for SPA POST/PUT/DELETE calls
+axios.get("/api/accounts/csrf/").catch(() => {
+	// ignore - some environments might block it; requests will fail with 403 until CSRF cookie exists
+});

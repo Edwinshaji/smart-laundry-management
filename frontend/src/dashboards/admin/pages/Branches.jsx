@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import { FiMapPin } from "react-icons/fi";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -148,37 +149,66 @@ const Branches = () => {
   return (
     <div className="space-y-6">
       {/* Form card */}
-      <div className="bg-white rounded-xl shadow p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-800">Branches</h3>
-          <button className="px-3 py-2 text-sm rounded-lg bg-purple-600 text-white" onClick={handleCreateOrUpdate}>
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-3 rounded-xl bg-orange-100">
+              <FiMapPin className="text-orange-600 text-xl" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-800">Branches</h3>
+              <p className="text-sm text-gray-500 mt-0.5">Create and manage branch locations.</p>
+            </div>
+          </div>
+          <button
+            className="px-4 py-2.5 text-sm rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium hover:from-purple-700 hover:to-indigo-700"
+            onClick={handleCreateOrUpdate}
+          >
             {editingId ? "Update Branch" : "Add Branch"}
           </button>
         </div>
 
+        <div className="p-6">
+
         <div className="grid gap-3 mb-4">
-          <select className="border rounded px-3 py-2 w-full" value={form.city_id} onChange={e => setForm({ ...form, city_id: e.target.value })}>
+          <select
+            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 w-full text-sm focus:bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            value={form.city_id}
+            onChange={e => setForm({ ...form, city_id: e.target.value })}
+          >
             <option value="">Select City</option>
             {cities.map((c) => (
               <option key={c.id} value={c.id}>{c.name}, {c.state}</option>
             ))}
           </select>
-          <input className="border rounded px-3 py-2 w-full" placeholder="Branch Name" value={form.branch_name} onChange={e => setForm({ ...form, branch_name: e.target.value })} />
-          <input className="border rounded px-3 py-2 w-full" placeholder="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
+          <input
+            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 w-full text-sm focus:bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            placeholder="Branch Name"
+            value={form.branch_name}
+            onChange={e => setForm({ ...form, branch_name: e.target.value })}
+          />
+          <input
+            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 w-full text-sm focus:bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            placeholder="Address"
+            value={form.address}
+            onChange={e => setForm({ ...form, address: e.target.value })}
+          />
         </div>
 
-        <div className="border rounded-lg p-3">
+        <div className="border border-gray-100 rounded-xl p-4">
           <div className="flex flex-col md:flex-row gap-2 mb-3">
             <input
-              className="border rounded px-3 py-2 flex-1"
+              className="border border-gray-200 rounded-lg px-3 py-2.5 flex-1 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
               placeholder="Search location (e.g., Chennai Central)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            <button className="px-3 py-2 rounded bg-gray-900 text-white" onClick={handleSearch}>Search</button>
+            <button className="px-4 py-2.5 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium" onClick={handleSearch}>
+              Search
+            </button>
           </div>
           {searchResults.length > 0 && (
-            <div className="border rounded mb-3">
+            <div className="border border-gray-200 rounded-lg mb-3 overflow-hidden">
               {searchResults.map((r, idx) => (
                 <button
                   key={idx}
@@ -201,57 +231,84 @@ const Branches = () => {
             </MapContainer>
           </div>
         </div>
+        </div>
       </div>
 
       {/* Listing card */}
-      <div className="bg-white rounded-xl shadow p-5">
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-gray-800">Branch List</h3>
+            <p className="text-sm text-gray-500 mt-0.5">All branches in the system.</p>
+          </div>
+          <div className="hidden md:inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+            {rows.length} branches
+          </div>
+        </div>
+
         {loading ? (
-          <div className="text-sm text-gray-500">Loading...</div>
+          <div className="p-6 text-sm text-gray-500">Loading...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px] border">
+            <table className="w-full text-sm min-w-[780px]">
               <thead className="text-left text-gray-500 bg-gray-50">
                 <tr>
-                  <th className="py-2 px-3 border-b">Branch</th>
-                  <th className="py-2 px-3 border-b">City</th>
-                  <th className="py-2 px-3 border-b">Status</th>
-                  <th className="py-2 px-3 border-b">Actions</th>
+                  <th className="py-3 px-4 font-medium">Branch</th>
+                  <th className="py-3 px-4 font-medium">City</th>
+                  <th className="py-3 px-4 font-medium">Status</th>
+                  <th className="py-3 px-4 font-medium text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="text-gray-700 divide-y">
+              <tbody className="divide-y divide-gray-100 text-gray-700">
                 {pagedRows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="py-2 px-3">{r.name}</td>
-                    <td className="py-2 px-3">{r.city}</td>
-                    <td className="py-2 px-3">
-                      <span className={`px-2 py-1 rounded text-xs ${r.status === "Active" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-gray-900">{r.name}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{r.address || ""}</div>
+                    </td>
+                    <td className="py-3 px-4">{r.city}</td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                          r.status === "Active" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                        }`}
+                      >
                         {r.status}
                       </span>
                     </td>
-                    <td className="py-2 px-3 flex gap-2">
-                      <button
-                        className="px-2 py-1 rounded bg-blue-600 text-white text-xs"
-                        onClick={() => handleEdit(r)}
-                      >
-                        Update
-                      </button>
-                      <button
-                        className="px-2 py-1 rounded bg-red-600 text-white text-xs"
-                        onClick={() => handleDelete(r.id)}
-                      >
-                        Delete
-                      </button>
+                    <td className="py-3 px-4">
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium"
+                          onClick={() => handleEdit(r)}
+                        >
+                          Update
+                        </button>
+                        <button
+                          className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
+                          onClick={() => handleDelete(r.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
+                {pagedRows.length === 0 && (
+                  <tr>
+                    <td className="py-10 px-4 text-center text-gray-500" colSpan={4}>
+                      No branches found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-4">
+        <div className="flex items-center justify-between p-4 border-t border-gray-100">
           <button
-            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+            className="px-4 py-2 rounded-xl text-sm font-semibold border transition-colors bg-white text-gray-700 border-gray-200 hover:bg-gray-50 disabled:opacity-50"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
           >
@@ -259,7 +316,7 @@ const Branches = () => {
           </button>
           <span className="text-xs text-gray-500">Page {page} of {totalPages}</span>
           <button
-            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+            className="px-4 py-2 rounded-xl text-sm font-semibold border transition-colors bg-white text-gray-700 border-gray-200 hover:bg-gray-50 disabled:opacity-50"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
           >

@@ -8,6 +8,7 @@ import ManagerDashboard from "../dashboards/manager/ManagerDashboard";
 import DeliveryDashboard from "../dashboards/delivery/DeliveryDashboard.jsx";
 import AdminDashboard from "../dashboards/admin/AdminDashboard";
 import { useAuth } from "../context/AuthContext";
+import LandingPage from "../pages/LandingPage";
 
 const AppRoutes = () => {
   const { isLoggedIn, role, getDashboardPath } = useAuth();
@@ -18,7 +19,7 @@ const AppRoutes = () => {
       ? role === requiredRole
         ? component
         : <Navigate to={dashboardPath} replace />
-      : <Navigate to="/login" replace />;
+      : <Navigate to="/" replace />;
 
   const guardAuthPage = (page) =>
     isLoggedIn ? <Navigate to={dashboardPath} replace /> : page;
@@ -26,6 +27,7 @@ const AppRoutes = () => {
   return (
     <Router>
       <Routes>
+        <Route path="/" element={guardAuthPage(<LandingPage />)} />
         <Route path="/login" element={guardAuthPage(<CustomerLogin />)} />
         <Route path="/register" element={guardAuthPage(<CustomerRegister />)} />
         <Route path="/staff/login" element={guardAuthPage(<StaffLogin />)} />

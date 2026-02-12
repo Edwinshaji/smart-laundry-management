@@ -10,20 +10,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='payment',
-            name='due_date',
-            field=models.DateField(blank=True, null=True),
-        ),
-        migrations.AddField(
-            model_name='payment',
-            name='subscription',
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.SET_NULL,
-                related_name='payments',
-                to='subscriptions.customersubscription'
-            ),
-        ),
+        # NO-OP: these fields are already created in payments/0001_initial.py.
+        # Keeping this migration file (empty) prevents duplicate column errors
+        # for databases that already have due_date/subscription.
     ]

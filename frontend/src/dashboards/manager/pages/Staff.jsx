@@ -1,11 +1,20 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { FiUsers } from "react-icons/fi";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 const Staff = () => {
   const [rows, setRows] = useState([]);
   const [zones, setZones] = useState([]);
+
+  const statusPill = (status) => {
+    const s = String(status || "").toLowerCase();
+    if (s === "active") return "bg-emerald-100 text-emerald-700";
+    if (s === "inactive") return "bg-gray-100 text-gray-700";
+    if (s === "suspended") return "bg-red-100 text-red-700";
+    return "bg-blue-100 text-blue-700";
+  };
 
   const fetchStaff = () => {
     axios
@@ -42,29 +51,45 @@ const Staff = () => {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow p-5">
-      <h3 className="font-semibold text-gray-800 mb-4">Delivery Staff (Approved)</h3>
+    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="p-3 rounded-xl bg-emerald-100">
+            <FiUsers className="text-emerald-600 text-xl" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-800">Delivery Staff (Approved)</h3>
+            <p className="text-sm text-gray-500 mt-0.5">Assign zones, toggle activity, and manage staff.</p>
+          </div>
+        </div>
+        <div className="hidden md:inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+          {rows.length} staff
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px] border">
+        <table className="w-full text-sm min-w-[980px]">
           <thead className="text-left text-gray-500 bg-gray-50">
             <tr>
-              <th className="py-2 px-3 border-b">Name</th>
-              <th className="py-2 px-3 border-b">Email</th>
-              <th className="py-2 px-3 border-b">Phone</th>
-              <th className="py-2 px-3 border-b">Zone</th>
-              <th className="py-2 px-3 border-b">Status</th>
-              <th className="py-2 px-3 border-b">Actions</th>
+              <th className="py-3 px-4 font-medium">Name</th>
+              <th className="py-3 px-4 font-medium">Email</th>
+              <th className="py-3 px-4 font-medium">Phone</th>
+              <th className="py-3 px-4 font-medium">Zone</th>
+              <th className="py-3 px-4 font-medium">Status</th>
+              <th className="py-3 px-4 font-medium text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y text-gray-700">
+          <tbody className="divide-y divide-gray-100 text-gray-700">
             {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="py-2 px-3">{r.name}</td>
-                <td className="py-2 px-3">{r.email}</td>
-                <td className="py-2 px-3">{r.phone}</td>
-                <td className="py-2 px-3">
+              <tr key={r.id} className="hover:bg-gray-50">
+                <td className="py-3 px-4">
+                  <div className="font-medium text-gray-900">{r.name}</div>
+                </td>
+                <td className="py-3 px-4">{r.email}</td>
+                <td className="py-3 px-4">{r.phone}</td>
+                <td className="py-3 px-4">
                   <select
-                    className="border rounded px-2 py-1 text-xs w-full"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs focus:bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
                     value={r.zone_id || ""}
                     onChange={(e) => handleAssignZone(r.id, e.target.value)}
                   >
@@ -74,17 +99,21 @@ const Staff = () => {
                     ))}
                   </select>
                 </td>
-                <td className="py-2 px-3">{r.status}</td>
-                <td className="py-2 px-3">
-                  <div className="flex gap-2">
+                <td className="py-3 px-4">
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusPill(r.status)}`}>
+                    {r.status}
+                  </span>
+                </td>
+                <td className="py-3 px-4">
+                  <div className="flex gap-2 justify-end">
                     <button
-                      className={`px-2 py-1 rounded text-white text-xs ${r.status === "Active" ? "bg-yellow-600" : "bg-emerald-600"}`}
+                      className={`px-3 py-1.5 rounded-lg text-white text-xs font-medium ${r.status === "Active" ? "bg-yellow-600 hover:bg-yellow-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
                       onClick={() => handleToggleActive(r.id, r.status === "Active")}
                     >
                       {r.status === "Active" ? "Deactivate" : "Activate"}
                     </button>
                     <button
-                      className="px-2 py-1 rounded bg-red-600 text-white text-xs"
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
                       onClick={() => handleDelete(r.id)}
                     >
                       Delete
@@ -95,7 +124,7 @@ const Staff = () => {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td className="py-3 px-3 text-gray-500 text-sm" colSpan={6}>
+                <td className="py-10 px-4 text-center text-gray-500" colSpan={6}>
                   No approved staff found.
                 </td>
               </tr>

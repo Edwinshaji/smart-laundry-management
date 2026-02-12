@@ -4,14 +4,10 @@ Run daily via cron/scheduler:
     python manage.py calculate_fines
 """
 from django.core.management.base import BaseCommand
-from django.db import transaction
-from datetime import date
-from decimal import Decimal
-from payments.models import Payment, PaymentFine
+from django.utils import timezone
 
-
-# Fine rate per day (as per README: ₹10 per day for demand orders)
-FINE_PER_DAY = Decimal("10.00")
+from payments.models import Payment
+from payments.services import compute_fine_amount, ensure_fine_for_payment
 
 
 class Command(BaseCommand):
@@ -26,33 +22,23 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
-        today = date.today()
+        today = timezone.localdate()
         
         # Get all pending payments that are overdue
-        overdue_payments = Payment.objects.filter(
-            payment_status="pending",
-            due_date__lt=today,
-        )
+        overdue_payments = Payment.objects.filter(payment_status="pending", due_date__isnull=False, due_date__lt=today)
         
         updated_count = 0
         
         for payment in overdue_payments:
             days_overdue = (today - payment.due_date).days
-            fine_amount = FINE_PER_DAY * days_overdue
+            fine_amount = compute_fine_amount(days_overdue=days_overdue)
             
             if dry_run:
                 self.stdout.write(
                     f"  [DRY-RUN] Payment #{payment.id}: {days_overdue} days overdue, fine ₹{fine_amount}"
                 )
             else:
-                with transaction.atomic():
-                    PaymentFine.objects.update_or_create(
-                        payment=payment,
-                        defaults={
-                            "fine_amount": fine_amount,
-                            "fine_days": days_overdue,
-                        },
-                    )
+                ensure_fine_for_payment(payment, today=today)
             
             updated_count += 1
         

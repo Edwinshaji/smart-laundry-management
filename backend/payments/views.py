@@ -5,9 +5,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from accounts.models import User
-from locations.models import Branch
+from locations.models import Branch, CustomerAddress, ServiceZone
 from orders.models import Order
 from .models import Payment, PaymentFine
+from .services import ensure_fine_for_payment
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from branch_management.models import BranchManager
@@ -132,22 +133,77 @@ class ManagerMonthlyPaymentsView(APIView):
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
+    def _get_branch_pincode_set(self, branch):
+        pincodes = set()
+        zones = ServiceZone.objects.filter(branch=branch).only("pincodes")
+        for z in zones:
+            raw = getattr(z, "pincodes", None) or []
+            if isinstance(raw, str):
+                # tolerate legacy/incorrect storage like "682001,682002"
+                raw = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+            if isinstance(raw, (list, tuple)):
+                for p in raw:
+                    s = str(p).strip()
+                    if s:
+                        pincodes.add(s)
+        return pincodes
+
     def get(self, request):
         branch = _get_branch(request)
         if not branch:
             return Response({"detail": "branch not found"}, status=status.HTTP_400_BAD_REQUEST)
 
-        user_ids = Order.objects.filter(
-            branch=branch,
-            order_type="monthly",
-        ).values_list("user_id", flat=True).distinct()
+        # Determine customers for this branch using their latest address pincode,
+        # matched against this branch's service-zone pincodes.
+        # This avoids missing payments when monthly orders haven't been generated yet.
+        branch_pincodes = self._get_branch_pincode_set(branch)
+        if not branch_pincodes:
+            return Response([], status=status.HTTP_200_OK)
+
+        # Consider users who have (or had) subscriptions at any point; payments always link to subscription.
+        sub_user_ids = list(CustomerSubscription.objects.values_list("user_id", flat=True).distinct())
+
+        latest_addr_by_user = {}
+        for addr in (
+            CustomerAddress.objects.filter(user_id__in=sub_user_ids)
+            .only("id", "user_id", "pincode")
+            .order_by("user_id", "-id")
+        ):
+            if addr.user_id not in latest_addr_by_user:
+                latest_addr_by_user[addr.user_id] = addr
+
+        eligible_user_ids = [
+            uid
+            for uid, addr in latest_addr_by_user.items()
+            if str(getattr(addr, "pincode", "")).strip() in branch_pincodes
+        ]
+
+        # Also include users that already have orders in this branch.
+        # This covers cases where the customer's latest address changed, but their
+        # subscription orders (and payments) still belong to this branch.
+        order_user_ids = list(
+            Order.objects.filter(branch=branch)
+            .values_list("user_id", flat=True)
+            .distinct()
+        )
+
+        eligible_user_ids = list(set(eligible_user_ids).union(set(order_user_ids)))
 
         payments = Payment.objects.select_related(
             "user", "subscription", "subscription__plan"
         ).filter(
             payment_type="monthly",
-            subscription__user_id__in=user_ids,
+            subscription__isnull=False,
+            subscription__user_id__in=eligible_user_ids,
         ).order_by("-due_date")[:200]
+
+        # NEW: ensure fine rows exist for any overdue pending payments in this list
+        try:
+            today = timezone.localdate()
+            for p in payments:
+                ensure_fine_for_payment(p, today=today)
+        except Exception:
+            pass
 
         fines_qs = PaymentFine.objects.filter(payment__in=payments).order_by("payment_id", "-calculated_at")
         fine_map = {}
@@ -198,8 +254,20 @@ class CustomerPayNowView(APIView):
         p.payment_date = date.today()
         p.save(update_fields=["payment_status", "payment_date"])
 
+        # NEW: clear any fine row for this payment
+        PaymentFine.objects.filter(payment=p).delete()
+
         if p.payment_type == "monthly" and p.subscription:
-            _renew_subscription_after_payment(p.subscription, request.user)
+            _renew_subscription_after_payment(p.subscription, request.user, payment=p)
+
+            # NEW: resume service by ensuring today's monthly order exists
+            try:
+                from django.utils import timezone
+                from orders import views as order_views
+                today_local = timezone.localdate()
+                order_views._ensure_monthly_orders_for_subscription(p.subscription, today_local, today_local)
+            except Exception:
+                pass
 
         return Response({"detail": "Payment successful"}, status=status.HTTP_200_OK)
 
@@ -208,9 +276,17 @@ class CustomerPaymentsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        today = timezone.localdate()
         payments = Payment.objects.select_related(
             "order", "subscription", "subscription__plan"
         ).filter(user=request.user).order_by("-id")[:200]
+
+        # NEW: ensure fines for any overdue pending payments in this list
+        try:
+            for p in payments:
+                ensure_fine_for_payment(p, today=today)
+        except Exception:
+            pass
 
         payment_ids = [p.id for p in payments]
         fines = PaymentFine.objects.filter(payment_id__in=payment_ids)
@@ -331,37 +407,53 @@ def verify_payment(request):
     except Exception:
         return Response({"detail": "Verification error"}, status=status.HTTP_502_BAD_GATEWAY)
 
-def _renew_subscription_after_payment(sub, user):
-    """Extend subscription by 30 days and ensure exactly one next pending monthly payment exists."""
+def _renew_subscription_after_payment(sub, user, *, payment=None):
+    """Extend subscription by 30 days.
+
+    NOTE: Do NOT create the next monthly payment immediately after a successful payment.
+    A new payment should be generated only when the current 30-day period completes
+    (see management command generate_monthly_payments).
+    """
     if not sub or not sub.is_active:
         return
+
+    # If this is the first monthly payment created at subscription signup,
+    # it covers the initial 30-day period and should NOT extend end_date.
+    try:
+        if payment and getattr(payment, "payment_type", None) == "monthly":
+            first_monthly_payment_id = (
+                Payment.objects.filter(subscription=sub, payment_type="monthly")
+                .order_by("id")
+                .values_list("id", flat=True)
+                .first()
+            )
+            if first_monthly_payment_id == getattr(payment, "id", None):
+                return
+    except Exception:
+        # Fail open: if we can't determine, keep existing behavior.
+        pass
 
     # NEW: ensure we have plan loaded (avoid edge cases where sub.plan isn't available)
     if not hasattr(sub, "plan") or sub.plan is None:
         sub = CustomerSubscription.objects.select_related("plan").get(id=sub.id)
 
     today = date.today()
-    current_end = sub.end_date if sub.end_date and sub.end_date >= today else today
-    new_end_date = current_end + timedelta(days=30)
+
+    # Do not extend early. Renewal should happen only when the period completed.
+    if sub.end_date and today < sub.end_date:
+        return
+
+    # Extend from end_date (spec requirement). If end_date is missing, extend from today.
+    base_end = sub.end_date or today
+    new_end_date = base_end + timedelta(days=30)
 
     sub.end_date = new_end_date
     sub.save(update_fields=["end_date"])
 
-    next_due_date = new_end_date
-
-    has_pending = Payment.objects.filter(
+    # Clear any pre-generated pending monthly payments created by older logic.
+    # After paying, the next payment should appear only when due.
+    Payment.objects.filter(
         subscription=sub,
         payment_type="monthly",
         payment_status="pending",
-    ).exists()
-
-    if not has_pending:
-        Payment.objects.create(
-            user=user,
-            subscription=sub,
-            order=None,
-            amount=sub.plan.monthly_price,
-            payment_type="monthly",
-            payment_status="pending",
-            due_date=next_due_date,
-        )
+    ).delete()

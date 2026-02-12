@@ -1,11 +1,34 @@
-from datetime import date, timedelta
-from django.conf import settings
+"""
+Generate daily subscription (monthly) pickup orders.
+
+Note on payment calculation (demand orders):
+- Amount is calculated when delivery staff records weight at pickup:
+  amount = max(weight_kg * ₹10, ₹10)
+- Implemented in backend/orders/views.py (see _update_demand_order_payment_amount and DeliveryOrderStatusView).
+- Monthly subscription payments are fixed by plan price (not weight-based).
+
+Note on "No Pickup Today":
+- Skip-days are recorded only if the day's monthly order is still 'scheduled';
+  once picked up/processed, skipping is blocked by the API.
+- Customer UI should block "No Pickup Today" if already marked for the day
+  or if today's monthly order is not in 'scheduled' state.
+
+Dev note (403 on POST endpoints):
+- If you use DRF SessionAuthentication, POST/PATCH/DELETE require CSRF.
+- Frontend must send X-CSRFToken (from csrftoken cookie) and include credentials.
+"""
+
+from datetime import date
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from subscriptions.models import CustomerSubscription, SubscriptionSkipDay
 from orders.models import Order
 from locations.models import CustomerAddress, ServiceZone
 from branch_management.models import DeliveryStaff
+
+# CHANGED: import the shared generator used by server startup/midnight jobs
+from orders.views import _ensure_monthly_orders_for_all
 
 
 def _resolve_branch_and_staff_for_user(user):
@@ -37,62 +60,43 @@ def _resolve_branch_and_staff_for_user(user):
 class Command(BaseCommand):
     help = "Generate daily subscription (monthly) orders for active subscriptions."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--date",
+            type=str,
+            default="",
+            help="Generate only for a specific date (YYYY-MM-DD). Default: today",
+        )
+        parser.add_argument(
+            "--days-ahead",
+            type=int,
+            default=None,
+            help="Generate for today..today+N (inclusive). If omitted, generates only today.",
+        )
+
     def handle(self, *args, **options):
-        days_ahead = int(getattr(settings, "MONTHLY_ORDER_GENERATE_DAYS_AHEAD", 1))
-        today = date.today()
-        end = today + timedelta(days=days_ahead)
+        raw_date = (options.get("date") or "").strip()
+        days_ahead_opt = options.get("days_ahead")
 
-        subs = CustomerSubscription.objects.select_related("user").filter(is_active=True)
-        created = 0
-        skipped = 0
+        if raw_date:
+            try:
+                target = date.fromisoformat(raw_date)
+            except Exception:
+                self.stderr.write("Invalid --date. Use YYYY-MM-DD.")
+                return
+            res = _ensure_monthly_orders_for_all(for_date=target, lock_timeout_s=10)
 
-        for sub in subs:
-            if sub.start_date and end < sub.start_date:
-                continue
-            if sub.end_date and sub.end_date < today:
-                continue
+        elif days_ahead_opt is not None:
+            horizon = int(days_ahead_opt)
+            res = _ensure_monthly_orders_for_all(days_ahead=horizon, lock_timeout_s=10)
 
-            branch, addr, staff = _resolve_branch_and_staff_for_user(sub.user)
-            if not branch or not addr:
-                skipped += 1
-                continue
+        else:
+            # CHANGED: default to today only
+            res = _ensure_monthly_orders_for_all(for_date=timezone.localdate(), lock_timeout_s=10)
 
-            existing = set(
-                Order.objects.filter(
-                    user=sub.user,
-                    order_type="monthly",
-                    pickup_date__gte=today,
-                    pickup_date__lte=end,
-                ).values_list("pickup_date", flat=True)
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Monthly orders ensured. created={res.get('created')} scanned={res.get('scanned')} "
+                f"range={res.get('start')}..{res.get('end')} lock={res.get('locked')}"
             )
-            skip_dates = set(
-                SubscriptionSkipDay.objects.filter(
-                    subscription=sub,
-                    skip_date__gte=today,
-                    skip_date__lte=end,
-                ).values_list("skip_date", flat=True)
-            )
-
-            d = today
-            while d <= end:
-                if sub.start_date and d < sub.start_date:
-                    d += timedelta(days=1); continue
-                if sub.end_date and d > sub.end_date:
-                    break
-                if d in existing or d in skip_dates:
-                    d += timedelta(days=1); continue
-
-                Order.objects.create(
-                    user=sub.user,
-                    branch=branch,
-                    address=addr,
-                    delivery_staff=staff,
-                    order_type="monthly",
-                    pickup_shift=sub.preferred_pickup_shift,
-                    pickup_date=d,
-                    status="scheduled",
-                )
-                created += 1
-                d += timedelta(days=1)
-
-        self.stdout.write(self.style.SUCCESS(f"Monthly orders created: {created}, subscriptions skipped (no addr/branch): {skipped}"))
+        )

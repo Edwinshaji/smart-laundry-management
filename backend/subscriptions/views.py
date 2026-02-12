@@ -6,14 +6,16 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from branch_management.models import BranchManager
 from locations.models import Branch
-from orders.models import Order, OrderWeight
+from orders.models import Order, OrderWeight, OrderStatusLog  # CHANGED: include OrderStatusLog
 from .models import CustomerSubscription, SubscriptionPlan, SubscriptionSkipDay
 from payments.models import Payment
+from payments.services import ensure_fine_for_payment
 from datetime import date, timedelta
 from django.db.models import Sum
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings  # NEW
+from decimal import Decimal  # NEW
 
 from locations.models import CustomerAddress, ServiceZone  # NEW/ensure present
 from branch_management.models import DeliveryStaff         # NEW/ensure present
@@ -45,58 +47,6 @@ def _resolve_monthly_order_context_for_user(u):
         staff = qs.filter(is_available=True).order_by("id").first() or qs.order_by("id").first()
 
     return branch, addr, staff
-
-def _ensure_monthly_orders_for_subscription(sub, days_ahead=MONTHLY_ORDER_GENERATE_DAYS_AHEAD):
-    if not sub or not sub.is_active:
-        return
-
-    today = date.today()
-    end = today + timedelta(days=int(days_ahead or 0))
-    if sub.end_date and sub.end_date < today:
-        return
-
-    branch, addr, staff = _resolve_monthly_order_context_for_user(sub.user)
-    if not branch or not addr:
-        return
-
-    existing_dates = set(
-        Order.objects.filter(
-            user=sub.user,
-            order_type="monthly",
-            pickup_date__gte=today,
-            pickup_date__lte=end,
-        ).values_list("pickup_date", flat=True)
-    )
-    skip_dates = set(
-        SubscriptionSkipDay.objects.filter(
-            subscription=sub,
-            skip_date__gte=today,
-            skip_date__lte=end,
-        ).values_list("skip_date", flat=True)
-    )
-
-    d = today
-    while d <= end:
-        if sub.start_date and d < sub.start_date:
-            d += timedelta(days=1)
-            continue
-        if sub.end_date and d > sub.end_date:
-            break
-        if d in existing_dates or d in skip_dates:
-            d += timedelta(days=1)
-            continue
-
-        Order.objects.create(
-            user=sub.user,
-            branch=branch,
-            address=addr,
-            delivery_staff=staff,  # important: so delivery dashboard sees it
-            order_type="monthly",
-            pickup_shift=sub.preferred_pickup_shift,
-            pickup_date=d,
-            status="scheduled",
-        )
-        d += timedelta(days=1)
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request):
@@ -297,7 +247,7 @@ class CustomerSubscribeView(APIView):
             end_date=end_date,
         )
 
-        # Create first month's payment - due immediately (4-day grace period)
+        # Create first month's payment at signup (4-day grace period)
         due_date = today + timedelta(days=4)
         payment = Payment.objects.create(
             user=request.user,
@@ -309,12 +259,12 @@ class CustomerSubscribeView(APIView):
             due_date=due_date,
         )
 
-        # NEW: generate today's (and next few) subscription orders immediately
+        # CHANGED: generate only TODAY's subscription order immediately (avoid tomorrow)
         try:
-            _ensure_monthly_orders_for_subscription(
-                subscription,
-                days_ahead=getattr(settings, "MONTHLY_ORDER_GENERATE_DAYS_AHEAD", 1),
-            )
+            from orders import views as order_views
+            start = timezone.localdate()
+            end = start
+            order_views._ensure_monthly_orders_for_subscription(subscription, start, end)
         except Exception:
             pass
 
@@ -341,36 +291,103 @@ class CustomerSubscriptionView(APIView):
             is_active=True,
         ).first()
 
-        today = date.today()
-        month_start = today.replace(day=1)
+        # CHANGED: use local date and compute rolling subscription period window
+        today = timezone.localdate()
 
-        total_pickups = Order.objects.filter(
-            user=request.user,
-            order_type="monthly",
-            pickup_date__gte=month_start,
-            pickup_date__lte=today,
-        ).count()
+        total_pickups = 0
+        total_weight = Decimal("0")
+        period_start = None
+        period_end = None
 
-        total_weight = OrderWeight.objects.filter(
-            order__user=request.user,
-            order__order_type="monthly",
-            recorded_at__date__gte=month_start,
-            recorded_at__date__lte=today,
-        ).aggregate(total=Sum("weight_kg"))["total"] or 0
+        if sub:
+            # rolling 30-day window based on end_date; clamp to [start_date, end_date] and today
+            sub_start = sub.start_date
+            sub_end = sub.end_date or today
 
-        # Get pending payment if any
+            period_end = min(sub_end, today)
+
+            # If end_date exists, treat current cycle as last 30 days ending at end_date
+            base_start = (sub_end - timedelta(days=30)) if sub.end_date else sub_start
+            if base_start is None:
+                base_start = today - timedelta(days=30)
+
+            period_start = max(base_start, sub_start) if sub_start else base_start
+            if period_start and period_end and period_end < period_start:
+                # safety for edge cases
+                period_start = period_end
+
+            total_pickups = Order.objects.filter(
+                user=request.user,
+                order_type="monthly",
+                pickup_date__gte=period_start,
+                pickup_date__lte=period_end,
+            ).count()
+
+            # CHANGED: sum weights by pickup_date (not recorded_at date)
+            agg = OrderWeight.objects.filter(
+                order__user=request.user,
+                order__order_type="monthly",
+                order__pickup_date__gte=period_start,
+                order__pickup_date__lte=period_end,
+            ).aggregate(total=Sum("weight_kg"))
+            total_weight = agg["total"] or Decimal("0")
+
+        # pending payment unchanged
         pending_payment = None
         if sub:
+            # If the 30-day period completed and there is no pending payment yet,
+            # generate one so the customer can see the amount to pay.
+            if sub.end_date and today >= sub.end_date:
+                has_pending = Payment.objects.filter(
+                    subscription=sub,
+                    payment_type="monthly",
+                    payment_status="pending",
+                ).exists()
+                if not has_pending:
+                    due_date = today + timedelta(days=4)
+                    Payment.objects.create(
+                        user=request.user,
+                        subscription=sub,
+                        order=None,
+                        amount=sub.plan.monthly_price,
+                        payment_type="monthly",
+                        payment_status="pending",
+                        due_date=due_date,
+                    )
+
             payment = Payment.objects.filter(
                 subscription=sub,
-                payment_status="pending"
-            ).first()
+                payment_type="monthly",
+                payment_status="pending",
+            ).order_by("due_date", "id").first()
             if payment:
+                fine = None
+                try:
+                    fine = ensure_fine_for_payment(payment, today=today)
+                except Exception:
+                    fine = getattr(payment, "fine", None)
+
+                is_overdue = bool(payment.due_date and payment.due_date < today)
+                days_overdue = (today - payment.due_date).days if is_overdue else 0
+                fine_amount = float(getattr(fine, "fine_amount", 0) or 0)
+                total_due = float(payment.amount or 0) + fine_amount
+
                 pending_payment = {
                     "id": payment.id,
                     "amount": float(payment.amount),
                     "due_date": payment.due_date.isoformat() if payment.due_date else None,
+                    "is_overdue": is_overdue,
+                    "days_overdue": days_overdue,
+                    "fine_amount": fine_amount,
+                    "fine_days": int(getattr(fine, "fine_days", 0) or 0),
+                    "total_due": total_due,
                 }
+
+        # NEW: remaining weight (optional for UI)
+        max_w = sub.plan.max_weight_per_month if (sub and sub.plan) else None
+        remaining = None
+        if max_w is not None:
+            remaining = max(Decimal(str(max_w)) - Decimal(str(total_weight)), Decimal("0"))
 
         return Response(
             {
@@ -387,6 +404,9 @@ class CustomerSubscriptionView(APIView):
                 "usage": {
                     "total_pickups": total_pickups,
                     "total_weight": float(total_weight),
+                    "remaining_weight": float(remaining) if remaining is not None else None,  # NEW
+                    "period_start": period_start.isoformat() if period_start else None,      # NEW
+                    "period_end": period_end.isoformat() if period_end else None,            # NEW
                 },
                 "pending_payment": pending_payment,
             },
@@ -422,7 +442,11 @@ class CustomerCancelSubscriptionView(APIView):
 
 
 class CustomerPaySubscriptionView(APIView):
-    """Mark subscription payment as paid and generate next month's payment."""
+    """Mark subscription payment as paid.
+
+    The next monthly payment should be generated only when the 30-day period completes
+    (not immediately after paying).
+    """
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -446,36 +470,53 @@ class CustomerPaySubscriptionView(APIView):
         payment.payment_date = date.today()
         payment.save(update_fields=["payment_status", "payment_date"])
 
-        # If this is a subscription payment, extend subscription and create next payment
+        # NEW: clear any fine record for this payment
+        try:
+            from payments.models import PaymentFine
+            PaymentFine.objects.filter(payment=payment).delete()
+        except Exception:
+            pass
+
+        # If this is a subscription payment:
+        # - The FIRST payment created at subscription signup covers the initial 30-day period,
+        #   so paying it should NOT extend end_date (otherwise it becomes ~60 days).
+        # - Renewal payments (generated when the current period completes) extend end_date by +30.
         if payment.subscription and payment.subscription.is_active:
             sub = payment.subscription
-            
-            # Extend subscription end date by 30 days from current end_date (or today if expired)
-            current_end = sub.end_date if sub.end_date and sub.end_date >= date.today() else date.today()
-            new_end_date = current_end + timedelta(days=30)
-            sub.end_date = new_end_date
-            sub.save(update_fields=["end_date"])
 
-            # Create next month's payment (due 30 days from now, with 4-day grace period)
-            next_due_date = new_end_date  # Payment due when subscription period ends
-            
-            # Check if next payment already exists
-            existing_next = Payment.objects.filter(
+            first_monthly_payment_id = (
+                Payment.objects.filter(subscription=sub, payment_type="monthly")
+                .order_by("id")
+                .values_list("id", flat=True)
+                .first()
+            )
+
+            is_first_monthly_payment = (first_monthly_payment_id == payment.id)
+            if not is_first_monthly_payment:
+                # Only renew (extend) when the current 30-day period has completed.
+                # This prevents a brand-new subscription (end_date in the future)
+                # from becoming ~60 days just because the first payment was paid.
+                if sub.end_date and date.today() < sub.end_date:
+                    pass
+                else:
+                    base_end = sub.end_date or date.today()
+                    sub.end_date = base_end + timedelta(days=30)
+                    sub.save(update_fields=["end_date"])
+
+            # Safety: clear any duplicate pending monthly payments created by older logic.
+            Payment.objects.filter(
                 subscription=sub,
+                payment_type="monthly",
                 payment_status="pending",
-                due_date__gte=date.today(),
-            ).exists()
-            
-            if not existing_next:
-                Payment.objects.create(
-                    user=request.user,
-                    subscription=sub,
-                    order=None,
-                    amount=sub.plan.monthly_price,
-                    payment_type="monthly",
-                    payment_status="pending",
-                    due_date=next_due_date,
-                )
+            ).exclude(id=payment.id).delete()
+
+            # NEW: after payment, resume service by ensuring today's monthly order exists
+            try:
+                from orders import views as order_views
+                today_local = timezone.localdate()
+                order_views._ensure_monthly_orders_for_subscription(sub, today_local, today_local)
+            except Exception:
+                pass
 
         return Response({"detail": "Payment successful"}, status=status.HTTP_200_OK)
 
@@ -484,11 +525,53 @@ class CustomerSkipDayView(APIView):
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic  # NEW: keep skip + cancel consistent
     def post(self, request):
         sub = CustomerSubscription.objects.filter(user=request.user, is_active=True).first()
         if not sub:
             return Response({"detail": "no active subscription"}, status=status.HTTP_400_BAD_REQUEST)
 
-        skip_date = request.data.get("date") or date.today().isoformat()
-        SubscriptionSkipDay.objects.get_or_create(subscription=sub, skip_date=skip_date)
-        return Response({"detail": "skip recorded"}, status=status.HTTP_201_CREATED)
+        raw = request.data.get("date")
+        if raw in [None, ""]:
+            skip_d = timezone.localdate()
+        else:
+            try:
+                skip_d = date.fromisoformat(str(raw))
+            except Exception:
+                return Response({"detail": "invalid date (use YYYY-MM-DD)"}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = (request.data.get("reason") or "").strip() or "No Pickup Today"
+
+        # NEW: if monthly order exists and is already progressed, don't allow skipping
+        monthly_order = (
+            Order.objects.filter(user=request.user, order_type="monthly", pickup_date=skip_d)
+            .order_by("-id")
+            .first()
+        )
+        if monthly_order and monthly_order.status != "scheduled":
+            return Response(
+                {"detail": f"Cannot mark no-pickup now (order already '{monthly_order.status}')."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        skip_obj, created = SubscriptionSkipDay.objects.get_or_create(
+            subscription=sub,
+            skip_date=skip_d,
+            defaults={"reason": reason},
+        )
+
+        # NEW: if an order exists for that day and is scheduled, cancel it too
+        if monthly_order and monthly_order.status == "scheduled":
+            monthly_order.status = "cancelled"
+            monthly_order.save(update_fields=["status"])
+            OrderStatusLog.objects.create(order=monthly_order, status="cancelled", changed_by=request.user)
+
+        return Response(
+            {
+                "detail": "skip recorded",
+                "skip_date": str(skip_d),
+                "already_marked": (not created),
+                "cancelled_order_id": monthly_order.id if monthly_order else None,
+            },
+            status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED,
+        )

@@ -65,7 +65,7 @@ INSTALLED_APPS = [
     'branch_management',
     'subscriptions',
     'orders.apps.OrdersConfig',  # CHANGED: ensure OrdersConfig.ready() runs
-    'payments',
+    'payments.apps.PaymentsConfig',  # CHANGED: ensure PaymentsConfig.ready() runs
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -189,12 +189,17 @@ REST_FRAMEWORK = {
     ],
 }
 
-# NEW: subscription monthly order generation horizon (used by management command / subscribe hook)
-MONTHLY_ORDER_GENERATE_DAYS_AHEAD = int(os.getenv("MONTHLY_ORDER_GENERATE_DAYS_AHEAD", "1"))
+# NEW: subscription monthly order generation horizon (used by jobs / subscribe hook)
+MONTHLY_ORDER_GENERATE_DAYS_AHEAD = int(os.getenv("MONTHLY_ORDER_GENERATE_DAYS_AHEAD", "0"))
 
-# CHANGED: run “midnight” in your local business timezone
-TIME_ZONE = os.getenv("TIME_ZONE", "Asia/Kolkata")
+# NEW: on server start, catch up and ensure today's monthly orders exist (covers downtime at midnight)
+ENABLE_MONTHLY_ORDER_STARTUP_CATCHUP = os.getenv("ENABLE_MONTHLY_ORDER_STARTUP_CATCHUP", "True") == "True"
+MONTHLY_ORDER_STARTUP_CATCHUP_DAYS_AHEAD = int(os.getenv("MONTHLY_ORDER_STARTUP_CATCHUP_DAYS_AHEAD", "0"))
 
 # NEW: toggle daily monthly-order generation thread (disable for multi-worker prod if needed)
 ENABLE_DAILY_MONTHLY_ORDER_JOB = os.getenv("ENABLE_DAILY_MONTHLY_ORDER_JOB", "True") == "True"
+
+# NEW: payment fine jobs
+ENABLE_FINE_STARTUP_CATCHUP = os.getenv("ENABLE_FINE_STARTUP_CATCHUP", "True") == "True"
+ENABLE_DAILY_FINE_JOB = os.getenv("ENABLE_DAILY_FINE_JOB", "True") == "True"
 

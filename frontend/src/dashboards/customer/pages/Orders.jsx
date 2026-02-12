@@ -4,6 +4,11 @@ import { FiPackage, FiPlus, FiCalendar, FiClock, FiMapPin, FiTruck, FiTrash2, Fi
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
+// NEW: make Axios compatible with Django SessionAuthentication CSRF
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 // NEW: local-day key (avoids UTC date shifts)
 const todayLocalISO = () => {
   const d = new Date();
@@ -79,8 +84,11 @@ const Orders = () => {
     }
   };
 
+  // NEW: today subscription order status (used by No Pickup Today gating)
+  const [todaySubscriptionOrder, setTodaySubscriptionOrder] = useState(null);
+
   useEffect(() => {
-    Promise.all([fetchOrders(), fetchAddresses()]).finally(() => setLoading(false));
+    Promise.all([fetchOrders(), fetchAddresses(), fetchTodaySubscriptionOrder()]).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -180,6 +188,17 @@ const Orders = () => {
   }, [safePage, totalPages]);
 
   const handleNoPickupToday = async () => {
+    // NEW: block early with reason (toast-like via banners)
+    const status = String(todaySubscriptionOrder?.status || "").toLowerCase();
+    if (skipDone) {
+      setError("Already marked “No Pickup Today” for today.");
+      return;
+    }
+    if (todaySubscriptionOrder && status !== "scheduled") {
+      setError(`Too late to skip: today's pickup is already '${status.replace(/_/g, " ")}'.`);
+      return;
+    }
+
     if (!window.confirm("Mark 'No Pickup Today' for your subscription pickup?")) return;
 
     setError("");
@@ -220,6 +239,9 @@ const Orders = () => {
       setSkipDone(true);
       setSuccess("No pickup marked for today (subscription).");
       setTimeout(() => setSuccess(""), 4000);
+
+      // NEW: refresh overview status (so UI stays consistent)
+      await fetchTodaySubscriptionOrder();
     } catch (e) {
       setError(e?.message || "Failed to mark no pickup today. Ensure backend route exists.");
     } finally {
@@ -237,6 +259,19 @@ const Orders = () => {
     }
   }, []);
 
+  const fetchTodaySubscriptionOrder = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/customer/overview/`, { withCredentials: true });
+      setTodaySubscriptionOrder(res?.data?.todaySubscriptionOrder || null);
+    } catch {
+      setTodaySubscriptionOrder(null);
+    }
+  };
+
+  useEffect(() => {
+    Promise.all([fetchOrders(), fetchAddresses(), fetchTodaySubscriptionOrder()]).finally(() => setLoading(false));
+  }, []);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -244,6 +279,18 @@ const Orders = () => {
       </div>
     );
   }
+
+  // NEW: compute button state
+  const todayStatus = String(todaySubscriptionOrder?.status || "").toLowerCase();
+  const canSkipToday = todaySubscriptionOrder && todayStatus === "scheduled" && !skipDone && !skipping;
+
+  const skipBlockReason =
+    skipDone
+      ? "Already marked for today."
+      : todaySubscriptionOrder && todayStatus !== "scheduled"
+        ? `Already '${todayStatus.replace(/_/g, " ")}'.
+        `
+        : "Not available.";
 
   return (
     <div className="space-y-6">
@@ -264,9 +311,19 @@ const Orders = () => {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleNoPickupToday}
-              disabled={skipping || skipDone}
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-white/10 hover:bg-white/15 ring-1 ring-white/15 disabled:opacity-50"
+              onClick={() => {
+                if (!canSkipToday) {
+                  setError(skipBlockReason);
+                  return;
+                }
+                handleNoPickupToday();
+              }}
+              disabled={skipping} // real disable only for in-flight
+              aria-disabled={!canSkipToday}
+              className={[
+                "hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold ring-1 ring-white/15",
+                canSkipToday ? "bg-white/10 hover:bg-white/15" : "bg-white/10 opacity-50 cursor-not-allowed",
+              ].join(" ")}
               title="Skip today’s subscription pickup"
             >
               <FiX />
@@ -412,9 +469,8 @@ const Orders = () => {
               <div className="bg-blue-50 rounded-xl p-4">
                 <h4 className="font-medium text-blue-800 mb-2">Pricing Info</h4>
                 <ul className="text-sm text-blue-700 space-y-1">
-                  <li>• ₹50 per kg (minimum ₹100)</li>
+                  <li>• ₹10 per kg</li>
                   <li>• Final amount calculated at pickup</li>
-                  <li>• Payment due 1 day after delivery</li>
                 </ul>
               </div>
 

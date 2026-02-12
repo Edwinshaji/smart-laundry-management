@@ -78,7 +78,7 @@ const Profile = () => {
     setError("");
     setSuccess("");
     try {
-      await axios.post(`${API_BASE_URL}/api/customer/change-password/`, {
+      await axios.post(`${API_BASE_URL}/api/accounts/customer/change-password/`, {
         old_password: passwords.old_password,
         new_password: passwords.new_password,
       }, { withCredentials: true });

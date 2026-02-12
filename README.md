@@ -530,6 +530,24 @@ Run daily to calculate fines for overdue payments:
 # Calculate fines for overdue payments (run daily)
 0 1 * * * cd /path/to/backend && python manage.py calculate_fines
 
+# Generate subscription (monthly) pickup orders at 12:00 AM (recommended)
+# NOTE: This works even if your app server was down at midnight.
+0 0 * * * cd /path/to/backend && python manage.py generate_monthly_orders
+
+Notes:
+- Default behavior is to generate subscription pickup orders for **today only**.
+- If you want to pre-generate future days, run:
+  `python manage.py generate_monthly_orders --days-ahead 1` (or set MONTHLY_ORDER_GENERATE_DAYS_AHEAD accordingly).
+- The backend also has an in-process "midnight" generator thread (dev-friendly),
+  but it only runs if the server process is up at 12:00 AM.
+- To handle downtime, the server performs a startup catch-up: when it starts,
+  it checks whether today's subscription pickup orders exist and creates missing ones.
+- Generation respects:
+  • subscription active + start/end dates
+  • skip-days (no-pickup)
+  • branch/address availability
+  • suspended subscriptions when monthly payment is overdue
+
 14.4 RAZORPAY INTEGRATION
 -------------------------
 - POST /api/payments/create-order/ - Create Razorpay order

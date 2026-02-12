@@ -15,17 +15,242 @@ from subscriptions.models import CustomerSubscription
 from django.contrib.auth import update_session_auth_hash
 from django.conf import settings
 from django.utils import timezone  # NEW
+from django.db import connection  # NEW
+from contextlib import contextmanager  # NEW
+import logging  # NEW
 
 from subscriptions.models import SubscriptionSkipDay
 
 # Price per kg for demand orders
-DEMAND_PRICE_PER_KG = Decimal("50.00")  # ₹50 per kg
-DEMAND_MINIMUM_CHARGE = Decimal("100.00")  # Minimum ₹100 per order
+DEMAND_PRICE_PER_KG = Decimal("10.00")  # CHANGED: ₹10 per kg
+DEMAND_MINIMUM_CHARGE = Decimal("10.00")  # CHANGED: minimum ₹10 per order
 
 # NEW: placeholder due_date to satisfy DB NOT NULL (if your DB still has NOT NULL); will be replaced on delivery
 DEMAND_DUE_DATE_PLACEHOLDER_DAYS = 3650  # ~10 years
 
 MONTHLY_ORDER_GENERATE_DAYS_AHEAD = 3  # NEW: keep small; runs on every dashboard load
+
+logger = logging.getLogger(__name__)  # NEW
+
+# NEW: per-process throttle so we don't scan all subscriptions on every request
+_LAST_MONTHLY_ENSURE_LOCALDATE = None
+
+@contextmanager
+def _mysql_named_lock(lock_name: str, timeout_s: int = 1):
+    """
+    Best-effort cross-process lock.
+
+    - MySQL/MariaDB: uses GET_LOCK/RELEASE_LOCK.
+    - Other backends (e.g., SQLite): falls back to an "always acquired" lock.
+
+    We still rely on idempotent generation (checking existing orders / skip-days)
+    to prevent duplicates.
+    """
+    # Non-MySQL backends don't support GET_LOCK; run unlocked.
+    if getattr(connection, "vendor", "") != "mysql":
+        yield True
+        return
+
+    got = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, %s)", [lock_name, int(timeout_s)])
+            row = cursor.fetchone()
+            got = bool(row and row[0] == 1)
+    except Exception:
+        got = False
+
+    try:
+        yield got
+    finally:
+        if got:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", [lock_name])
+            except Exception:
+                pass
+
+
+def _as_date(d):
+    """Normalize a Date/DateTime-ish value to date (or None)."""
+    if d is None:
+        return None
+    return d.date() if hasattr(d, "date") else d
+
+
+def _subscription_is_suspended_for_generation(sub, on_date):
+    """
+    Suspend generation if there's an overdue pending monthly payment.
+    Rule implemented: if pending payment due_date < on_date => suspended.
+    """
+    try:
+        p = (
+            Payment.objects.filter(
+                subscription=sub,
+                payment_type="monthly",
+                payment_status="pending",
+                due_date__isnull=False,
+            )
+            .order_by("due_date")
+            .first()
+        )
+        due = _as_date(getattr(p, "due_date", None))
+        suspended = bool(due and due < on_date)
+
+        # NEW: if overdue, persist/update fine row so PaymentFine table is populated.
+        if suspended and p:
+            try:
+                from payments.services import ensure_fine_for_payment
+                ensure_fine_for_payment(p, today=_as_date(on_date))
+            except Exception:
+                pass
+
+        return suspended
+    except Exception:
+        # Fail open (don't block) if payment schema differs
+        return False
+
+
+def _resolve_monthly_order_context_for_user(user):
+    """
+    Resolve latest address -> service zone -> branch and delivery staff.
+    Returns (branch, address, staff) or (None, None, None).
+    """
+    addr = CustomerAddress.objects.filter(user=user).order_by("-id").first()
+    if not addr or not getattr(addr, "pincode", None):
+        return None, None, None
+
+    zone = _get_service_zone_for_pincode(getattr(addr, "pincode", None))
+    branch = zone.branch if zone else None
+    if not branch:
+        return None, None, None
+
+    staff = _resolve_delivery_staff_for_zone(zone)
+    return branch, addr, staff
+
+
+def _ensure_monthly_orders_for_subscription(sub, start_date, end_date):
+    """
+    Create missing monthly orders for a single subscription between [start_date, end_date].
+    Idempotent by (user, order_type='monthly', pickup_date).
+    """
+    if not sub or not getattr(sub, "is_active", False):
+        return 0
+
+    start_date = _as_date(start_date)
+    end_date = _as_date(end_date)
+    if not start_date or not end_date or end_date < start_date:
+        return 0
+
+    # subscription validity window
+    sub_start = _as_date(getattr(sub, "start_date", None))
+    sub_end = _as_date(getattr(sub, "end_date", None))
+
+    if sub_start and end_date < sub_start:
+        return 0
+    if sub_end and start_date > sub_end:
+        return 0
+
+    # suspension check (overdue monthly payment)
+    if _subscription_is_suspended_for_generation(sub, start_date):
+        return 0
+
+    eff_start = max(start_date, sub_start) if sub_start else start_date
+    eff_end = min(end_date, sub_end) if sub_end else end_date
+    if eff_end < eff_start:
+        return 0
+
+    branch, addr, staff = _resolve_monthly_order_context_for_user(sub.user)
+    if not branch or not addr:
+        return 0
+
+    existing_dates = set(
+        Order.objects.filter(
+            user=sub.user,
+            order_type="monthly",
+            pickup_date__gte=eff_start,
+            pickup_date__lte=eff_end,
+        ).values_list("pickup_date", flat=True)
+    )
+    skip_dates = set(
+        SubscriptionSkipDay.objects.filter(
+            subscription=sub,
+            skip_date__gte=eff_start,
+            skip_date__lte=eff_end,
+        ).values_list("skip_date", flat=True)
+    )
+
+    created = 0
+    d = eff_start
+    while d <= eff_end:
+        if d in existing_dates or d in skip_dates:
+            d += timedelta(days=1)
+            continue
+
+        Order.objects.create(
+            user=sub.user,
+            branch=branch,
+            address=addr,
+            delivery_staff=staff,
+            order_type="monthly",
+            pickup_shift=sub.preferred_pickup_shift,
+            pickup_date=d,
+            status="scheduled",
+        )
+        created += 1
+        d += timedelta(days=1)
+
+    return created
+
+
+def _ensure_monthly_orders_for_all(*, for_date=None, days_ahead=0, lock_timeout_s=1):
+    """
+    Generate missing monthly orders for all active subscriptions.
+    - for_date: if provided, generate only for that date
+    - days_ahead: horizon from today (inclusive) if for_date is None
+    """
+    today = timezone.localdate()
+    if for_date:
+        start = end = _as_date(for_date)
+    else:
+        start = today
+        end = today + timedelta(days=int(days_ahead or 0))
+
+    if not start or not end:
+        return {"created": 0, "scanned": 0, "start": str(start), "end": str(end), "locked": False}
+
+    created_total = 0
+    scanned = 0
+
+    with _mysql_named_lock("washmate:monthly_orders", timeout_s=lock_timeout_s) as got:
+        if not got:
+            return {"created": 0, "scanned": 0, "start": str(start), "end": str(end), "locked": False}
+
+        subs = CustomerSubscription.objects.select_related("user").filter(is_active=True)
+        for sub in subs:
+            scanned += 1
+            try:
+                created_total += _ensure_monthly_orders_for_subscription(sub, start, end)
+            except Exception:
+                # keep batch alive
+                logger.exception("monthly order generation failed for subscription=%s", getattr(sub, "id", None))
+
+    return {"created": created_total, "scanned": scanned, "start": str(start), "end": str(end), "locked": True}
+
+
+def _ensure_monthly_orders_once_per_process_per_day():
+    """
+    Safe to call from request handlers; does real work at most once/day per process.
+    """
+    global _LAST_MONTHLY_ENSURE_LOCALDATE
+    today = timezone.localdate()
+    if _LAST_MONTHLY_ENSURE_LOCALDATE == today:
+        return
+    _LAST_MONTHLY_ENSURE_LOCALDATE = today
+
+    # CHANGED: only ensure TODAY (avoid generating tomorrow)
+    _ensure_monthly_orders_for_all(for_date=today, lock_timeout_s=1)
+
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request):
@@ -128,9 +353,9 @@ class DeliveryOrdersView(APIView):
         if err:
             return err
 
-        # NEW: ensure monthly orders exist so dashboard can show them
+        # CHANGED: ensure monthly orders exist (throttled: once/day/process)
         try:
-            _ensure_monthly_orders_for_all()
+            _ensure_monthly_orders_once_per_process_per_day()
         except Exception:
             pass
 
@@ -200,7 +425,9 @@ class DeliveryOrderStatusView(APIView):
             return Response({"detail": "invalid transition"}, status=status.HTTP_400_BAD_REQUEST)
         if new_status == "reached_branch" and order.status != "picked_up":
             return Response({"detail": "invalid transition"}, status=status.HTTP_400_BAD_REQUEST)
-        if new_status == "delivered" and order.status != "ready_for_delivery":
+
+        # CHANGED: allow delivered directly from reached_branch too
+        if new_status == "delivered" and order.status not in {"ready_for_delivery", "reached_branch"}:
             return Response({"detail": "invalid transition"}, status=status.HTTP_400_BAD_REQUEST)
 
         if new_status not in {"picked_up", "reached_branch", "delivered"}:
@@ -338,7 +565,7 @@ class CustomerOverviewView(APIView):
         ).exists()
 
         # NEW: today’s subscription pickup (monthly order) for overview-card
-        today = date.today()
+        today = timezone.localdate()
         todays_monthly = (
             Order.objects.filter(user=request.user, order_type="monthly", pickup_date=today)
             .order_by("-id")
@@ -405,10 +632,12 @@ class CustomerOrdersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # NEW: ensure this customer's monthly orders exist too
+        # CHANGED: only ensure TODAY for this user (avoid generating tomorrow)
         try:
             sub = CustomerSubscription.objects.select_related("user").filter(user=request.user, is_active=True).first()
-            _ensure_monthly_orders_for_subscription(sub)
+            start = timezone.localdate()
+            end = start
+            _ensure_monthly_orders_for_subscription(sub, start, end)
         except Exception:
             pass
 
@@ -661,6 +890,18 @@ class CustomerNoPickupTodayView(APIView):
         today = timezone.localdate()
         reason = (request.data.get("reason") or "No Pickup Today").strip()
 
+        # CHANGED: check today's order FIRST (don't create skip-day if too late)
+        todays_order = (
+            Order.objects.filter(user=request.user, order_type="monthly", pickup_date=today)
+            .order_by("-id")
+            .first()
+        )
+        if todays_order and todays_order.status != "scheduled":
+            return Response(
+                {"detail": f"Cannot mark no-pickup now (order already '{todays_order.status}')."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         skip, created = SubscriptionSkipDay.objects.get_or_create(
             subscription=sub,
             skip_date=today,
@@ -668,19 +909,6 @@ class CustomerNoPickupTodayView(APIView):
         )
 
         # If order already generated for today, cancel it (only if still scheduled)
-        todays_order = (
-            Order.objects.filter(user=request.user, order_type="monthly", pickup_date=today)
-            .order_by("-id")
-            .first()
-        )
-
-        if todays_order and todays_order.status != "scheduled":
-            # too late to skip if already progressed
-            return Response(
-                {"detail": f"Cannot mark no-pickup now (order already '{todays_order.status}')."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         if todays_order and todays_order.status == "scheduled":
             todays_order.status = "cancelled"
             todays_order.save(update_fields=["status"])

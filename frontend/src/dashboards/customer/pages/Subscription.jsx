@@ -2,6 +2,11 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { FiCheck, FiCalendar, FiPackage, FiCreditCard, FiAlertCircle, FiClock, FiX } from "react-icons/fi";
 
+// NEW: make Axios compatible with Django SessionAuthentication CSRF
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 // NEW: local-day key (avoids UTC date shifts)
 const todayLocalISO = () => {
   const d = new Date();
@@ -213,6 +218,17 @@ const Subscription = () => {
   };
 
   const handleNoPickupToday = async () => {
+    // NEW: block early with a clear message (toast-like via banner)
+    const status = String(todaySubscriptionOrder?.status || "").toLowerCase();
+    if (skipDone) {
+      setError("Already marked “No Pickup Today” for today.");
+      return;
+    }
+    if (todaySubscriptionOrder && status !== "scheduled") {
+      setError(`Too late to skip: today's pickup is already '${status.replace(/_/g, " ")}'`);
+      return;
+    }
+
     if (!window.confirm("Mark 'No Pickup Today' for your subscription pickup?")) return;
 
     setSkipping(true);
@@ -356,6 +372,17 @@ const Subscription = () => {
   }
 
   if (subscription) {
+    // NEW: compute UI state for the button
+    const todayStatus = String(todaySubscriptionOrder?.status || "").toLowerCase();
+    const canSkipToday = Boolean(todaySubscriptionOrder) && todayStatus === "scheduled" && !skipDone && !skipping;
+
+    const skipBlockReason =
+      skipDone
+        ? "Already marked for today."
+        : todaySubscriptionOrder && todayStatus !== "scheduled"
+          ? `Already '${todayStatus.replace(/_/g, " ")}'`
+          : "Not available.";
+
     return (
       <div className="space-y-6">
         {error && (
@@ -392,9 +419,21 @@ const Subscription = () => {
                 </span>
 
                 <button
-                  onClick={handleNoPickupToday}
-                  disabled={skipping || skipDone || String(todaySubscriptionOrder.status || "").toLowerCase() !== "scheduled"}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+                  onClick={() => {
+                    if (!canSkipToday) {
+                      setError(skipBlockReason);
+                      return;
+                    }
+                    handleNoPickupToday();
+                  }}
+                  disabled={skipping} // keep real disable only while request is in-flight
+                  aria-disabled={!canSkipToday}
+                  className={[
+                    "inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium",
+                    canSkipToday
+                      ? "bg-gray-100 hover:bg-gray-200"
+                      : "bg-gray-100 opacity-50 cursor-not-allowed",
+                  ].join(" ")}
                   title="Skip today’s pickup (only if still scheduled)"
                 >
                   <FiX />

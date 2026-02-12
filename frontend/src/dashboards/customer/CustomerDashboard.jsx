@@ -17,7 +17,7 @@ const CustomerDashboard = () => {
 
   const handleLogout = () => {
     logout();
-    navigate("/login", { replace: true });
+    navigate("/", { replace: true });
   };
 
   const handleTabChange = (key) => {
