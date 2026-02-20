@@ -30,13 +30,15 @@ pymysql.install_as_MySQLdb()
 # if not SECRET_KEY:
 #     raise RuntimeError("DJANGO_SECRET_KEY is not set. Check backend/.env and load_dotenv().")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", 'django-insecure-r4$x0ct&)wqn)yk*t23b3visyw%3jwtzcn4w#!50is5@a4)_fr')
+# SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", 'django-insecure-r4$x0ct&)wqn)yk*t23b3visyw%3jwtzcn4w#!50is5@a4)_fr')
+SECRET_KEY = os.environ.get("SECRET_KEY")
 
-# DEBUG = os.getenv("DEBUG") == "True"
-DEBUG = os.getenv("DEBUG", "True") == "True"
+# DEBUG = os.getenv("DEBUG", "True") == "True"
+DEBUG = False
 
 # dev convenience (prevents DisallowedHost when you move between localhost/127.0.0.1)
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+# ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ['*']
 
 # Razorpay - strip quotes if accidentally included
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "").strip("'\"")
@@ -104,14 +106,25 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES ={
-    'default':{
-        'ENGINE':'django.db.backends.mysql',  # This works for PyMySQL
-        'NAME':'smart_laundry_db',
-        'USER':'root',
-        'PASSWORD':'Edwin@1520',
-        'HOST':'localhost',
-        'PORT':'3307',
+# DATABASES ={
+#     'default':{
+#         'ENGINE':'django.db.backends.mysql',  # This works for PyMySQL
+#         'NAME':'smart_laundry_db',
+#         'USER':'root',
+#         'PASSWORD':'Edwin@1520',
+#         'HOST':'localhost',
+#         'PORT':'3307',
+#     }
+# }
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.environ.get('MYSQLDATABASE'),
+        'USER': os.environ.get('MYSQLUSER'),
+        'PASSWORD': os.environ.get('MYSQLPASSWORD'),
+        'HOST': os.environ.get('MYSQLHOST'),
+        'PORT': os.environ.get('MYSQLPORT'),
     }
 }
 
@@ -151,36 +164,40 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # CORS / CSRF configuration
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:5173",
+#     "http://127.0.0.1:5173",
+#     "http://localhost:3000",
+#     "http://127.0.0.1:3000",
+# ]
+CORS_ALLOW_ALL_ORIGINS=True
 
 # Allow cookies to be sent with cross-origin requests
 CORS_ALLOW_CREDENTIALS = True
 
 # IMPORTANT: For development, use Lax instead of None to avoid issues
 # None requires HTTPS in modern browsers
-SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SAMESITE = "None"
 
 # Dev over HTTP - keep False
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
+# SESSION_COOKIE_SECURE = False
+# CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
 # Allow reading CSRF cookie in JS
 CSRF_COOKIE_HTTPONLY = False
 
 # IMPORTANT: Trust the frontend origin for CSRF
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    # "http://localhost:5173",
+    # "http://127.0.0.1:5173",
+    # "http://localhost:3000",
+    # "http://127.0.0.1:3000",
 ]
 
 REST_FRAMEWORK = {
